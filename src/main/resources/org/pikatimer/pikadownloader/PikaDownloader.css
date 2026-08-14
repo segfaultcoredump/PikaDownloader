@@ -1,0 +1,36 @@
+.root {
+    -fx-color-nominal: #00A37A; /* Dark Cyan */
+    -fx-color-warning: #D55E00; /* Dark Orange / Chocolate */
+    -fx-color-error:   #222222; /* Charcoal Grey / Black */
+}
+
+/* -------------------------------------------------------------
+   Application 1: Styling Standard Elements (Shapes, Text, etc.)
+   ------------------------------------------------------------- */
+/* .status-circle-nominal {
+    -fx-fill: -fx-color-nominal;
+}
+.status-circle-warning {
+    -fx-fill: -fx-color-warning;
+}
+.status-circle-error {
+    -fx-fill: -fx-color-error;
+} */
+
+/* -------------------------------------------------------------
+   Application 2: Overriding JavaFX Progress Bar Colors
+   ------------------------------------------------------------- */
+/* JavaFX uses the internal key "-fx-accent" to color the filled track */
+
+/*
+.progress-bar-nominal {
+    -fx-accent: -fx-color-nominal;
+}
+
+.progress-bar-warning {
+    -fx-accent: -fx-color-warning;
+}
+
+.progress-bar-error {
+    -fx-accent: -fx-color-error;
+} */

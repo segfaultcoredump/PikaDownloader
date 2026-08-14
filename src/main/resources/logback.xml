@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Copyright (C) 2026 john garner
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+-->
+
+
+
+<configuration scan="true" scanPeriod="30 seconds" >
+    <!-- 1. Define the timestamp variable at the top -->
+    <timestamp key="dateStamp" datePattern="yyyyMMdd'T'HHmmss" />
+  
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSSS} [%thread] %-5level %logger{50} - %msg%n</pattern>
+        </encoder>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>TRACE</level>
+        </filter>
+    </appender>
+    <!-- <appender name="DebugLogHolder" class="com.pikatimer.pikareader.util.DebugLogHolder"/> -->
+    <!-- <appender name="FILE" class="ch.qos.logback.core.FileAppender">
+        <file>${java.io.tmpdir}/PikaReciever-${dateStamp}.log</file>
+        <append>true</append>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>TRACE</level>
+        </filter>
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{50} - %msg%n</pattern>
+        </encoder>
+    </appender> -->
+    <appender name="ROLLING" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${java.io.tmpdir}/PikaReciever-${dateStamp}.log</file>
+    
+
+       
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>TRACE</level>
+        </filter>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+        <fileNamePattern>${java.io.tmpdir}/PikaReciever-%d{yyyy-MM-dd}.log</fileNamePattern>
+        <!-- Clean history right when the app boots up -->
+        <cleanHistoryOnStart>true</cleanHistoryOnStart>
+        <!-- Acts as your safety net for total disk space -->
+        <totalSizeCap>500MB</totalSizeCap> 
+    </rollingPolicy>
+
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSSS} [%thread] %-5level %logger{50} - %msg%n</pattern>
+        </encoder>
+    </appender>
+    <root level="TRACE"> 
+        <appender-ref ref="STDOUT" />
+        <appender-ref ref="ROLLING" />
+    </root>
+    
+    <logger name="org.java_websocket" level="INFO" />
+    <logger name="org.pikatimer" level="TRACE" />
+    
+    
+</configuration>
+
+

@@ -1,17 +1,26 @@
 {
-    "bin": {"pikareceiver": "jdeploy-bundle/jdeploy.js"},
+    "bin": {
+        "pikareceiver": "jdeploy-bundle/jdeploy.js"
+    },
     "author": "John Garner",
     "main": "index.js",
     "preferGlobal": true,
     "version": "1.0.0",
     "jdeploy": {
+        "args": [
+            "-X[mac]dock:name=\"PikaDownloader\"",
+            "--enable-native-access=javafx.graphics",
+            "--add-opens javafx.graphics/javafx.scene=ALL-UNNAMED",
+            "-Xms1g",
+            "-Xmx1g"
+        ],
         "fallbackToUniversal": false,
         "generateLegacyBundles": false,
         "publishTargets": [{
-            "name": "npm: github",
-            "type": "NPM",
-            "url": ""
-        }],
+                "name": "npm: github",
+                "type": "NPM",
+                "url": ""
+            }],
         "javaVersion": "25",
         "permissions": [
             {
@@ -27,11 +36,13 @@
                 "description": "Ability to scan the local network to detect PikaReader instances"
             }
         ],
-        "jar": "target/PikaReceiver-0.5-jar-with-dependencies.jar",
+        "jar": "target/PikaDownloader-0.5-jar-with-dependencies.jar",
         "javafx": true,
-        "title": "Pikareceiver",
+        "title": "PikaDownloader",
         "platformBundlesEnabled": false,
-        "downloadPage": {"platforms": ["default"]}
+        "downloadPage": {
+            "platforms": ["default"]
+        }
     },
     "dependencies": {
         "command-exists-promise": "^2.0.2",
@@ -40,8 +51,10 @@
         "yauzl": "^2.10.0",
         "shelljs": "^0.8.4"
     },
-    "license": "ISC",
+    "license": "GPL-3.0",
     "name": "pikareceiver",
     "files": ["jdeploy-bundle"],
-    "scripts": {"test": "echo \"Error: no test specified\" && exit 1"}
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1"
+    }
 }

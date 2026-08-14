@@ -13,7 +13,7 @@
 <?import javafx.scene.text.Font?>
 <?import org.controlsfx.control.ToggleSwitch?>
 
-<VBox xmlns="http://javafx.com/javafx/23" xmlns:fx="http://javafx.com/fxml/1" fx:controller="org.pikatimer.pikareceiver.LocalReaderCellController">
+<VBox xmlns="http://javafx.com/javafx/8.0.141" xmlns:fx="http://javafx.com/fxml/1" fx:controller="org.pikatimer.pikadownloader.RemoteReaderCellController">
    <children>
       <TitledPane fx:id="titledPane">
          <content>
@@ -38,31 +38,13 @@
                         <Insets bottom="2.0" left="2.0" right="2.0" top="2.0" />
                      </padding>
                   </HBox>
-                  <HBox alignment="CENTER_LEFT" maxWidth="1.7976931348623157E308" spacing="2.0">
-                     <children>
-                        <Label text="IP:">
-                           <font>
-                              <Font size="14.0" />
-                           </font>
-                        </Label>
-                        <Label fx:id="ipLabel" text="127.0.0.1">
-                           <font>
-                              <Font size="14.0" />
-                           </font>
-                        </Label>
-                     </children>
-                     <padding>
-                        <Insets bottom="2.0" left="2.0" right="2.0" top="2.0" />
-                     </padding>
-                  </HBox>
                   <HBox alignment="CENTER_LEFT" spacing="5.0">
                      <children>
-                        <Label alignment="CENTER_RIGHT" contentDisplay="RIGHT" text="Reading:" textAlignment="RIGHT">
+                        <Label fx:id="locationLabel" text="&lt;Location&gt;">
                            <font>
-                              <Font name="System Bold" size="14.0" />
+                              <Font size="16.0" />
                            </font>
                         </Label>
-                        <Circle fx:id="readStatusCircle" fill="#949494" radius="9.0" stroke="BLACK" strokeType="INSIDE" />
                         <Label maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
                         <Label alignment="CENTER_RIGHT" contentDisplay="RIGHT" text="Online:" textAlignment="RIGHT">
                            <font>
@@ -75,12 +57,28 @@
                         <Insets bottom="2.0" left="2.0" right="2.0" top="2.0" />
                      </padding>
                   </HBox>
+                  <HBox alignment="CENTER_LEFT" spacing="5.0">
+                     <children>
+                        <Label fx:id="macLabel" text="FF:EE:DD">
+                           <font>
+                              <Font size="16.0" />
+                           </font>
+                        </Label>
+                        <Label maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
+                        <Label alignment="CENTER_RIGHT" contentDisplay="RIGHT" text="Reading:" textAlignment="RIGHT">
+                           <font>
+                              <Font name="System Bold" size="14.0" />
+                           </font>
+                        </Label>
+                        <Circle fx:id="readStatusCircle" fill="#949494" radius="9.0" stroke="BLACK" strokeType="INSIDE" />
+                     </children>
+                     <padding>
+                        <Insets bottom="2.0" left="2.0" right="2.0" top="2.0" />
+                     </padding>
+                  </HBox>
                   <HBox alignment="CENTER_LEFT" spacing="2.0">
                      <children>
-                        <Label text="Output File: ">
-                           <font>
-                              <Font size="14.0" />
-                           </font></Label>
+                        <Label text="Output File: " />
                         <TextField fx:id="outputFileTextField" HBox.hgrow="ALWAYS" />
                         <ToggleSwitch fx:id="outputFileToggleSwitch" prefHeight="18.0" prefWidth="36.0" />
                      </children>
@@ -90,7 +88,7 @@
                   </HBox>
                   <HBox alignment="CENTER_LEFT">
                      <children>
-                        <Button fx:id="startReaderButton" mnemonicParsing="false" prefWidth="85.0" text="Start Reader" />
+                        <Button fx:id="startReaderButton" mnemonicParsing="false" text="Start Reader" />
                         <Pane maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
                         <Label alignment="CENTER_RIGHT" text="Reads: " />
                         <Label fx:id="readCountLabel" alignment="CENTER_RIGHT" minHeight="-Infinity" minWidth="-Infinity" prefHeight="17.0" prefWidth="40.0" text="00000" HBox.hgrow="ALWAYS" />
@@ -101,7 +99,7 @@
                   </HBox>
                   <HBox alignment="CENTER_LEFT" spacing="2.0">
                      <children>
-                        <Button fx:id="rewindButton" mnemonicParsing="false" prefHeight="26.0" prefWidth="85.0" text="Rewind" />
+                        <Button fx:id="rewindButton" mnemonicParsing="false" text="Rewind" />
                         <Pane maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
                         <Label alignment="CENTER_RIGHT" contentDisplay="RIGHT" text="Last Read: " textAlignment="RIGHT" />
                         <Label fx:id="lastReadLabel" alignment="CENTER_RIGHT" prefHeight="30.0" prefWidth="131.0" text="&lt;pending&gt;" />

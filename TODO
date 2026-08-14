@@ -1,0 +1,46 @@
+PikaDownloader TODO:
+
+General: 
+    
+    * GitHub site setup
+    * GitHub Readme.md
+    * JDeploy setup
+
+    Use CSS for basic status colors so we are not hard coded everywhere
+
+Output:
+       
+    Have the output accordion show the bib -> chip being active or not
+    Persist directories for output directory to prefs
+
+    Bib -> Chip UI from PikaTimer
+    Read review / search similar to Pikatimer
+    Beep on chip read (volume and pitch can be changed on a per-reader basis)
+
+    Filter on expected chips or only ones in Bib -> Chip mapping
+
+
+Local PikaReader: 
+
+    Migrate to Jackson json library
+    Migrate from org.java_websocket to java.net.http websocket client
+
+    manual add of IP / Hostname in discovery window
+    
+    Update TitledPane to show reader battery and connectivity stats (if available)
+
+    Disconnect / Connect & Remove Button
+
+Remote:
+    Red highlights around reader if it is in a "warning" state (low batt, not connected, etc)
+
+    Connect to remote PikaRelay
+    Show online status
+    Multi-select the 'add reader' option
+    Hide Remote Reader Battery Status if not available
+    
+    Update TitledPane to show reader battery and connectivity stats (if available)
+   
+
+
+

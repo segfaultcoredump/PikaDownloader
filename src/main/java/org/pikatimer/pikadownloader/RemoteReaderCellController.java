@@ -3,7 +3,7 @@
  * To change this template file, choose Tools | Templates
  * and open the template in the editor.
  */
-package org.pikatimer.pikareceiver;
+package org.pikatimer.pikadownloader;
 
 import java.io.IOException;
 import static java.lang.Integer.MAX_VALUE;
@@ -41,6 +41,7 @@ import javafx.scene.control.ProgressBar;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextFormatter;
 import javafx.scene.control.TextFormatter.Change;
+import javafx.scene.control.TextInputDialog;
 import javafx.scene.control.TitledPane;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.HBox;
@@ -58,17 +59,18 @@ import org.slf4j.LoggerFactory;
  *
  * @author john
  */
-public class LocalReaderCellController {
-    static final Logger logger = LoggerFactory.getLogger(LocalReaderCellController.class);
+public class RemoteReaderCellController {
+    static final Logger logger = LoggerFactory.getLogger(RemoteReaderCellController.class);
 
     private static final HttpClient httpClient = HttpClient.newBuilder()
         .version(HttpClient.Version.HTTP_2)
         .connectTimeout(Duration.ofSeconds(10))
         .build();
 
-    LocalReader reader = null;
+    RemoteReader reader = null;
     @FXML TitledPane titledPane;
-    
+    @FXML Label macLabel;
+    @FXML Label locationLabel;
     @FXML Label unitNameLabel;
     @FXML ProgressBar batteryLevelProgressBar;
     @FXML Circle onlineSstatusCircle;
@@ -79,7 +81,6 @@ public class LocalReaderCellController {
     @FXML Button startReaderButton;
     @FXML Label readCountLabel;
     @FXML Label lastReadLabel;
-    @FXML Label ipLabel;
     
     UnaryOperator<Change> filter = change -> {
         String text = change.getText();
@@ -92,32 +93,39 @@ public class LocalReaderCellController {
 
      
     public void initialize() {
+        locationLabel.setOnMouseClicked( event -> {
+            if(event.getButton().equals(MouseButton.PRIMARY)){
+                if(event.getClickCount() == 2){
+                    updateLocationText();
+                }
+            }
+        });
+        unitNameLabel.setOnMouseClicked( event -> {
+            if(event.getButton().equals(MouseButton.PRIMARY)){
+                if(event.getClickCount() == 2){
+                    updateUnitNameText();
+                }
+            }
+        });
 
         outputFileTextField.setTextFormatter(textFormatter);
         
         outputFileToggleSwitch.disableProperty().bind(outputFileTextField.textProperty().isEmpty());
-        
-        
     } 
     
-    public void setReader(LocalReader r){
+    public void setReader(RemoteReader r){
         reader = r;
-        
-        ipLabel.setText(reader.getReaderIPProperty().getValueSafe());
-        ipLabel.setOnMouseClicked(event -> {
-            if (event.getButton() == MouseButton.PRIMARY) {
-                //HostServices hostServices = getHostServices();
-                //hostServices.showDocument("http://" + reader.reader_ip + ":8080");
-            }
-        });
+        // MAC address
+        String mac = reader.getReaderIDProperty().getValueSafe();
+        macLabel.textProperty().set(mac.substring(0, 2) + ":" + mac.substring(2, 4)+ ":" + mac.substring(4, 6));
         
         // Name and Location
-        
+        locationLabel.textProperty().bind(reader.getReaderLocationProperty());
         unitNameLabel.textProperty().bind(reader.getReaderNameProperty());
-        titledPane.textProperty().bind(reader.getReaderNameProperty());
+        titledPane.textProperty().bind(Bindings.concat(reader.getReaderNameProperty(),": ",reader.getReaderLocationProperty()));
         
         // Battery Level
-        batteryLevelProgressBar.progressProperty().bind(reader.getBatteryProperty());
+        batteryLevelProgressBar.progressProperty().bind(reader.getBatteryProperty().divide(100.0f));
         
         // Reading status
         if (reader.getReadingProperty().getValue()) {
@@ -143,7 +151,7 @@ public class LocalReaderCellController {
         lastReadLabel.textProperty().bind(reader.getLastReadProperty());
         
         // Last Updated
-        Integer u = reader.getLastUpdatedProperty().getValue();
+        Integer u = reader.getUpdatedProperty().getValue();
         if (u < 20) {
             onlineSstatusCircle.setFill(Color.LIGHTGREEN);
         } else if (u > 120) {
@@ -151,7 +159,7 @@ public class LocalReaderCellController {
         } else {
             onlineSstatusCircle.setFill(Color.YELLOW);
         }
-        reader.getLastUpdatedProperty().addListener((ov, o, n) -> {
+        reader.getUpdatedProperty().addListener((ov, o, n) -> {
             logger.trace("Reader updated Property listener fired " + o + " -> " + n);
             if (n.intValue() < 20) {
                 onlineSstatusCircle.setFill(Color.LIGHTGREEN);
@@ -170,46 +178,151 @@ public class LocalReaderCellController {
         
         outputFileTextField.textProperty().setValue(r.getOutputFileProperty().getValueSafe());
         outputFileTextField.textProperty().addListener((observable, oldValue, newValue) -> {
-            logger.trace("Output File Update for " + reader.getReaderNameProperty() + " -> " + newValue);
+            logger.trace("Output File Update for " + mac + " -> " + newValue);
             if (!oldValue.equals(newValue)) outputFileToggleSwitch.setSelected(false);
             reader.getOutputFileProperty().setValue(newValue);
         });
         
         startReaderButton.setOnAction(event -> {
-            toggleReading();
-        });
+            toggleReading();}
+        );
         
         rewindButton.setOnAction(event -> {
-            rewind();
-        });
+            rewind();}
+        );
         
     }
 
-    
+    private void updateLocationText() {
+        TextInputDialog dialog = new TextInputDialog(reader.getReaderLocationProperty().getValueSafe());
+        dialog.setTitle("Change Reader Location");
+        dialog.setHeaderText("Update Location for " + reader.getReaderNameProperty().getValueSafe());
+        dialog.setContentText("New Location:");
+
+        // Traditional way to get the response value.
+        Optional<String> result = dialog.showAndWait();
+        if (result.isPresent()){
+            logger.debug("Changing reader " + reader.getReaderIDProperty().getValueSafe() + " location string to " + result.get());
+            
+             JSONObject command = new JSONObject();
+            command.put("mac", reader.getReaderIDProperty().getValueSafe());
+            command.put("rename_location", result.get());
+            command.put("location", result.get());
+        
+            String endpoint = PikaReceiverPrefs.INSTANCE.getEchoEndpoint();
+            
+            logger.debug("Posting to " + endpoint + "commands/ : \n " + command.toString(4));
+
+            HttpRequest request = HttpRequest.newBuilder()
+                .POST(HttpRequest.BodyPublishers.ofString(command.toString()))
+                .uri(URI.create(endpoint + "command/"))
+                .setHeader("User-Agent", "Echo Transmitter") // add request header
+                .header("Content-Type", "application/json")
+                .build();
+            try {
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                // print status code
+                logger.trace("remoteReaderCellController::updateLocationText Response Code: " + Integer.toString(response.statusCode()));
+                logger.trace("remoteReaderCellController::updateLocationText Response Body: " + response.body());   
+                Alert confAlert = new Alert(AlertType.INFORMATION);
+                confAlert.setTitle("Request Sent");
+                confAlert.setContentText("Rename Request Sent");
+                confAlert.setHeaderText(null);
+
+                confAlert.showAndWait();
+            } catch (IOException | InterruptedException ex) {
+                logger.error(ex.getMessage());
+            }
+        }
+    }
+
+    private void updateUnitNameText() {
+        TextInputDialog dialog = new TextInputDialog(reader.getReaderNameProperty().getValueSafe());
+        dialog.setTitle("Change Reader Name");
+        dialog.setHeaderText("Update Name for "+ reader.getReaderIDProperty().getValueSafe());
+        dialog.setContentText("New Name:");
+
+        // Traditional way to get the response value.
+        Optional<String> result = dialog.showAndWait();
+        if (result.isPresent()){
+            logger.debug("Changing reader " + reader.getReaderIDProperty().getValueSafe() + " location string to " + result.get());
+            
+             JSONObject command = new JSONObject();
+            command.put("mac", reader.getReaderIDProperty().getValueSafe());
+            command.put("rename_reader", result.get());
+            command.put("location", result.get());
+        
+            String endpoint = PikaReceiverPrefs.INSTANCE.getEchoEndpoint();
+            
+            logger.debug("Posting to " + endpoint + "commands/ : \n " + command.toString(4));
+
+            HttpRequest request = HttpRequest.newBuilder()
+                .POST(HttpRequest.BodyPublishers.ofString(command.toString()))
+                .uri(URI.create(endpoint + "command/"))
+                .setHeader("User-Agent", "Echo Transmitter") // add request header
+                .header("Content-Type", "application/json")
+                .build();
+            try {
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                // print status code
+                logger.trace("remoteReaderCellController::updateLocationText Response Code: " + Integer.toString(response.statusCode()));
+                logger.trace("remoteReaderCellController::updateLocationText Response Body: " + response.body());   
+                Alert confAlert = new Alert(AlertType.INFORMATION);
+                confAlert.setTitle("Request Sent");
+                confAlert.setContentText("Rename Request Sent");
+                confAlert.setHeaderText(null);
+
+                confAlert.showAndWait();
+            } catch (IOException | InterruptedException ex) {
+                logger.error(ex.getMessage());
+            }
+        }
+    }
 
     private void toggleReading() {
-        Boolean currentReadingStatus = reader.getReadingProperty().getValue();
+        Boolean currentStatus = reader.getReadingProperty().getValue();
         Alert alert = new Alert(AlertType.CONFIRMATION);
         alert.setTitle("Start/Stop Reader");
         
         JSONObject command = new JSONObject();
         command.put("mac", reader.getReaderIDProperty().getValueSafe());
-        if (currentReadingStatus == true) {
-            alert.setHeaderText("Stop Reader");
+        if (currentStatus == true) {
+            alert.setHeaderText("Stop Remote Reader");
             alert.setContentText("This will stop the remote reader.\nAre you ok with this?");
             command.put("command", "STOP");
         } else {
-            alert.setHeaderText("Start Reader");
+            alert.setHeaderText("Start Remote Reader");
             alert.setContentText("This will start the remote reader.\nAre you ok with this?");
             command.put("command", "START");
         }
         
         Optional<ButtonType> result = alert.showAndWait();
-        if (result.get() == ButtonType.OK) {
+        if (result.get() == ButtonType.OK){
             // send the stop or start command...
+            String endpoint = PikaReceiverPrefs.INSTANCE.getEchoEndpoint();
             
-            if (currentReadingStatus) reader.stopReader();
-            else reader.startReader();
+            logger.trace("Posting to " + endpoint + "commands/ : \n " + command.toString(4));
+
+            HttpRequest request = HttpRequest.newBuilder()
+                .POST(HttpRequest.BodyPublishers.ofString(command.toString()))
+                .uri(URI.create(endpoint + "command/"))
+                .setHeader("User-Agent", "Echo Transmitter") // add request header
+                .header("Content-Type", "application/json")
+                .build();
+            try {
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                // print status code
+                logger.trace("remoteReaderCellController::toggleReadingProperty Response Code: " + Integer.toString(response.statusCode()));
+                logger.trace("remoteReaderCellController::toggleReadingProperty Response Body: " + response.body());   
+                Alert confAlert = new Alert(AlertType.INFORMATION);
+                confAlert.setTitle("Request Sent");
+                confAlert.setContentText("Request Sent");
+                confAlert.setHeaderText(null);
+
+                confAlert.showAndWait();
+            } catch (IOException | InterruptedException ex) {
+                logger.error(ex.getMessage());
+            }
         }
     }
 
@@ -343,7 +456,7 @@ public class LocalReaderCellController {
                 Task dataSyncTask = new Task<Void>() {
                     @Override protected Void call() {
 
-                        String endpoint =  PikaReceiverPrefs.getInstance().getEchoEndpoint();
+                        String endpoint =  PikaReceiverPrefs.INSTANCE.getEchoEndpoint();
                         String mac = reader.getReaderIDProperty().getValueSafe();
 
                         logger.trace("remoteReaderCellController::Rewind Thread Starting ");
@@ -369,7 +482,7 @@ public class LocalReaderCellController {
                             logger.trace("FXMLmainController::startPollingThread Response Body: " + response.body());    
                             // convert the response body into the command array
                             if (response.statusCode()<= 299 ) {
-                                //reader.processTime(response.body());
+                                reader.processTime(response.body());
                             }
                         } catch (Exception ex) {
                             logger.error(ex.getMessage());
@@ -404,7 +517,7 @@ public class LocalReaderCellController {
                 command.put("command", "REWIND " + startTimestamp.toString() + " " + endTimestamp.toString());
 
                 // send the rewind command...
-                String endpoint = PikaReceiverPrefs.getInstance().getEchoEndpoint();
+                String endpoint = PikaReceiverPrefs.INSTANCE.getEchoEndpoint();
 
                 logger.trace("Posting to " + endpoint + "commands/ : \n " + command.toString(4));
 

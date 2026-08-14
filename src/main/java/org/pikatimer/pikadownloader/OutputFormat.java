@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2026 john
+ * Copyright (C) 2026 john garner
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,17 +14,34 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-package org.pikatimer.pikareceiver;
-
-import javafx.beans.property.StringProperty;
-import javafx.scene.layout.Pane;
+package org.pikatimer.pikadownloader;
 
 /**
  *
  * @author john
  */
-public interface Reader {
-    public Pane getControlPane();
+
+// TODO: make this just a bare enum and move the logic to the OutputProcessor
+
+public enum OutputFormat {
     
-    StringProperty getReaderIDProperty();
+    Chip2Time("Chip,Time"),
+    Bib2Time("Bib,Time"),
+    RFIDServer("RFIDServer"),
+    RFIDServer_EXT("RFIDServer (Extended)"),
+    CUSTOM("Custom Format");
+    
+    
+
+    private final String label;
+    
+
+    OutputFormat(String label) {
+        this.label = label;
+    }
+
+    @Override
+    public String toString() {
+        return label; // Controls what is displayed in the ComboBox dropdown
+    }
 }

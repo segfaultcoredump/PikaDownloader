@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Accordion?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ChoiceBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ListView?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Pane?>
+<?import javafx.scene.layout.VBox?>
+<?import javafx.scene.text.Font?>
+<?import org.controlsfx.control.ToggleSwitch?>
+
+<VBox maxHeight="1.7976931348623157E308" maxWidth="1.7976931348623157E308" spacing="4.0" stylesheets="@PikaDownloader.css" xmlns="http://javafx.com/javafx/23" xmlns:fx="http://javafx.com/fxml/1" fx:controller="org.pikatimer.pikadownloader.FXMLmainController">
+   <children>
+      <TitledPane animated="false" collapsible="false" maxHeight="1.7976931348623157E308" maxWidth="1.7976931348623157E308" text="Readers" VBox.vgrow="ALWAYS">
+         <content>
+            <ListView fx:id="readerListView" maxHeight="1.7976931348623157E308" maxWidth="1.7976931348623157E308">
+               <padding>
+                  <Insets top="2.0" />
+               </padding>
+            </ListView>
+         </content>
+         <font>
+            <Font size="16.0" />
+         </font>
+      </TitledPane>
+      <HBox alignment="CENTER_RIGHT" maxWidth="1.7976931348623157E308" spacing="4.0" VBox.vgrow="NEVER">
+         <children>
+            <Button fx:id="addLocalButton" mnemonicParsing="false" text="Add Local Reader..." />
+            <Pane maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
+            <Button fx:id="reviewReadsButton" mnemonicParsing="false" text="Review Reads..." />
+         </children>
+         <padding>
+            <Insets bottom="2.0" left="2.0" right="2.0" top="2.0" />
+         </padding>
+      </HBox>
+    <TitledPane animated="false" text="Output Settings" VBox.vgrow="NEVER">
+         <content>
+            <VBox spacing="4.0">
+               <children>
+                  <HBox alignment="CENTER_LEFT" maxHeight="1.7976931348623157E308" spacing="5.0">
+                     <children>
+                        <Label minWidth="-Infinity" prefWidth="90.0" text="Output Dir" HBox.hgrow="NEVER" />
+                        <TextField fx:id="ouputDirTextField" maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
+                        <Button fx:id="outputDirButton" minWidth="-Infinity" mnemonicParsing="false" prefHeight="26.0" prefWidth="60.0" text="Select" />
+                     </children>
+                     <VBox.margin>
+                        <Insets bottom="2.0" />
+                     </VBox.margin>
+                  </HBox>
+                  <HBox alignment="CENTER_LEFT" maxHeight="1.7976931348623157E308" maxWidth="1.7976931348623157E308" spacing="5.0">
+                     <children>
+                        <Label prefHeight="17.0" prefWidth="90.0" text="Output Format">
+                           <padding>
+                              <Insets right="5.0" />
+                           </padding>
+                        </Label>
+                        <ChoiceBox fx:id="outputFormatChoiceBox" maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
+                     </children>
+                  </HBox>
+                  <HBox fx:id="customFormatHBox" alignment="CENTER_LEFT" spacing="5.0">
+                     <children>
+                        <Label prefHeight="17.0" prefWidth="90.0" text="Custom Format" />
+                        <TextField fx:id="customFormatTextField" HBox.hgrow="ALWAYS" />
+                     </children>
+                  </HBox>
+                  <HBox alignment="CENTER_LEFT" maxWidth="1.7976931348623157E308">
+                     <children>
+                        <Button fx:id="setupChipBibButton" mnemonicParsing="false" text="Setup Chip -&gt; Bib" />
+                        <Pane maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
+                        <ToggleSwitch fx:id="customBibMapToggleSwitch" maxWidth="1.7976931348623157E308" text="Use Bib -&gt; Chip Map" />
+                     </children>
+                     <VBox.margin>
+                        <Insets top="4.0" />
+                     </VBox.margin>
+                  </HBox>
+               </children>
+            </VBox>
+         </content>
+         <font>
+            <Font size="16.0" />
+         </font>
+      </TitledPane>
+      <Accordion focusTraversable="false" managed="false" visible="false" VBox.vgrow="NEVER">
+        <panes>
+          <TitledPane animated="false" expanded="false" text="Remote Settings">
+               <content>
+                  <VBox>
+                     <children>
+                        <HBox alignment="CENTER" maxHeight="1.7976931348623157E308" spacing="2.0">
+                           <children>
+                              <Label minWidth="-Infinity" prefWidth="60.0" text="Relay: " HBox.hgrow="NEVER" />
+                              <TextField fx:id="relayURLTextField" maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
+                              <Button fx:id="connectButton" mnemonicParsing="false" prefHeight="25.0" prefWidth="75.0" text="Connect" />
+                           </children>
+                        </HBox>
+                        <HBox alignment="CENTER" maxHeight="1.7976931348623157E308" maxWidth="1.7976931348623157E308" spacing="4.0" VBox.vgrow="NEVER">
+                           <children>
+                              <Label minHeight="-Infinity" minWidth="-Infinity" prefWidth="60.0" text="Status: " />
+                              <Label fx:id="statusLabel" maxWidth="1.7976931348623157E308" text="&lt;status&gt;" HBox.hgrow="ALWAYS" />
+                           </children>
+                           <VBox.margin>
+                              <Insets bottom="5.0" left="5.0" right="5.0" top="5.0" />
+                           </VBox.margin>
+                        </HBox>
+                     </children>
+                  </VBox>
+               </content>
+               <font>
+                  <Font size="16.0" />
+               </font>
+            </TitledPane>
+        </panes>
+         <VBox.margin>
+            <Insets />
+         </VBox.margin>
+      </Accordion>
+   </children>
+</VBox>

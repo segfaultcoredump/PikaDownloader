@@ -1,9 +1,20 @@
 /*
- * To change this license header, choose License Headers in Project Properties.
- * To change this template file, choose Tools | Templates
- * and open the template in the editor.
+ * Copyright (C) 2026 john garner
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-package org.pikatimer.pikareceiver;
+package org.pikatimer.pikadownloader;
 
 import java.io.BufferedWriter;
 import java.io.File;
@@ -37,8 +48,8 @@ import org.slf4j.LoggerFactory;
  * @author john
  */
 public class RemoteReader implements Reader {
-    static final Preferences prefs = PikaReceiverPrefs.getInstance().getPreferences();
-    static final Map<String,String> bibChipMap = PikaReceiverPrefs.getInstance().getBibChipMap();
+    static final Preferences prefs = PikaReceiverPrefs.INSTANCE.getPreferences();
+    static final Map<String,String> bibChipMap = OutputProcessor.INSTANCE.getBibChipMap();
 
     static final Logger logger = LoggerFactory.getLogger(RemoteReader.class);
     static final Set<String> processedReads = new HashSet();
@@ -203,7 +214,7 @@ public class RemoteReader implements Reader {
         if (outputFileBW == null){
             FileWriter fw = null;
             try {
-                File file = new File(PikaReceiverPrefs.getInstance().getOutputDir(),outputFileProperty.getValueSafe());
+                File file = new File(PikaReceiverPrefs.INSTANCE.getOutputDir(),outputFileProperty.getValueSafe());
                 fw = new FileWriter(file,true);
                 outputFileBW = new BufferedWriter(fw);
             } catch (IOException ex) {
@@ -288,7 +299,7 @@ public class RemoteReader implements Reader {
             if (outputFileBW == null){
                 FileWriter fw = null;
                 try {
-                    File file = new File(PikaReceiverPrefs.getInstance().getOutputDir(),outputFileProperty.getValueSafe());
+                    File file = new File(PikaReceiverPrefs.INSTANCE.getOutputDir(),outputFileProperty.getValueSafe());
                     fw = new FileWriter(file,true);
                     outputFileBW = new BufferedWriter(fw);
                 } catch (IOException ex) {

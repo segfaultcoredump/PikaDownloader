@@ -1,4 +1,4 @@
-module org.pikatimer.pikareceiver {
+module org.pikatimer.pikadownloader {
     requires javafx.controls;
     requires java.base;
     requires java.net.http;
@@ -7,8 +7,11 @@ module org.pikatimer.pikareceiver {
     requires org.slf4j;
     requires java.prefs;
     requires org.controlsfx.controls; 
+    requires org.java_websocket;
+    requires org.apache.commons.lang3;
+    requires java.desktop;
 
-    opens org.pikatimer.pikareceiver to javafx.fxml;
-    exports org.pikatimer.pikareceiver;
+    opens org.pikatimer.pikadownloader to javafx.fxml, javafx.graphics;
+    exports org.pikatimer.pikadownloader;
     
 }

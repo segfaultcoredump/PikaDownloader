@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
   <modelVersion>4.0.0</modelVersion>
-  <groupId>org.pikatimer.PikaReceiver</groupId>
-  <artifactId>PikaReceiver</artifactId>
-  <name>PikaReceiver</name>
+  <groupId>org.pikatimer.PikaDownloader</groupId>
+  <artifactId>PikaDownloader</artifactId>
+  <name>PikaDownloader</name>
   <version>0.5</version>
   <build>
     <plugins>
@@ -52,7 +52,11 @@
           </execution>
         </executions>
         <configuration>
-          <mainClass>org.pikatimer.pikareceiver.PikaReceiver</mainClass>
+          <mainClass>org.pikatimer.pikadownloader.PikaDownloader</mainClass>
+          <options>
+            <option>--enable-native-access</option>
+            <option>javafx.graphics</option>
+          </options>
         </configuration>
       </plugin>
       <plugin>
@@ -72,7 +76,7 @@
           </descriptorRefs>
           <archive>
             <manifest>
-              <mainClass>org.pikatimer.pikareceiver.PikaReceiver</mainClass>
+              <mainClass>org.pikatimer.pikadownloader.PikaDownloader</mainClass>
             </manifest>
           </archive>
         </configuration>

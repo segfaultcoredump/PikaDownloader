@@ -3,7 +3,7 @@
  * To change this template file, choose Tools | Templates
  * and open the template in the editor.
  */
-package org.pikatimer.pikareceiver;
+package org.pikatimer.pikadownloader;
 
 import java.io.File;
 import java.util.HashMap;
@@ -14,26 +14,17 @@ import java.util.prefs.Preferences;
  *
  * @author john
  */
-public class PikaReceiverPrefs {
+public enum PikaReceiverPrefs {
+    INSTANCE;
+    
     private static final Preferences prefs = Preferences.userRoot().node("PikaReceiver");
     private File outputDir = null;
     private String echoEndpoint = "";
-    private Map<String,String> bibChipMap = new HashMap();
-
-    /**
-    * SingletonHolder is loaded on the first execution of Singleton.getInstance() 
-    * or the first access to SingletonHolder.INSTANCE, not before.
-    */
     
-    private static class SingletonHolder { 
-            private static final PikaReceiverPrefs INSTANCE = new PikaReceiverPrefs();
-    }
-
-    public static PikaReceiverPrefs getInstance() {
-        
-            return SingletonHolder.INSTANCE;
-    }
+    // TODO: Move this to the OutputProcessor
     
+
+       
     public Preferences getPreferences(){
         return prefs;
     }
@@ -54,8 +45,6 @@ public class PikaReceiverPrefs {
         echoEndpoint = e;
     }
     
-    public Map<String,String> getBibChipMap(){
-        return bibChipMap;
-    }
+    
     
 }
