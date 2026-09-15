@@ -1,13 +1,11 @@
 {
-    "bin": {
-        "pikareceiver": "jdeploy-bundle/jdeploy.js"
-    },
+    "bin": {"pikareceiver": "jdeploy-bundle/jdeploy.js"},
     "author": "John Garner",
     "description": "Downloader for PikaReader systems",
     "main": "index.js",
     "preferGlobal": true,
-    "version": "0.5",
     "repository": {"url": "https://github.com/PikaTimer/PikaDownloader"},
+    "version": "0.5",
     "jdeploy": {
         "args": [
             "-X[mac]dock:name=\"PikaDownloader\"",
@@ -38,9 +36,14 @@
         "javafx": true,
         "title": "PikaDownloader",
         "platformBundlesEnabled": false,
-        "downloadPage": {
-            "platforms": ["default"]
-        }
+        "downloadPage": {"platforms": [
+            "mac-high-sierra",
+            "mac-arm64",
+            "debian-x64",
+            "mac-x64",
+            "windows-x64",
+            "linux-x64"
+        ]}
     },
     "dependencies": {
         "command-exists-promise": "^2.0.2",
@@ -50,9 +53,7 @@
         "shelljs": "^0.8.4"
     },
     "license": "GPL-3.0",
-    "name": "pikadownloader",
+    "name": "PikaDownloader",
     "files": ["jdeploy-bundle"],
-    "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1"
-    }
+    "scripts": {"test": "echo \"Error: no test specified\" && exit 1"}
 }
