@@ -20,6 +20,10 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -49,12 +53,12 @@ public enum OutputProcessor {
 
     private static final Logger logger = LoggerFactory.getLogger(OutputProcessor.class);
 
-    private static final Preferences prefs = PikaReceiverPrefs.INSTANCE.getPreferences();
+    private static final Preferences prefs = PikaDownloaderPrefs.INSTANCE.getPreferences();
     private static final BlockingQueue<Read> readQueue = new ArrayBlockingQueue(100000);
     private static final Map<String, BufferedWriter> bufferedWriterMap = new ConcurrentHashMap();
 
-    private OutputFormat outputFormat = OutputFormat.valueOf(PikaReceiverPrefs.INSTANCE.getPreferences().get("OutputFormat", OutputFormat.Chip2Time.name()));
-    private String customFormat = PikaReceiverPrefs.INSTANCE.getPreferences().get("CustomOutputFormat", "");
+    private OutputFormat outputFormat = OutputFormat.valueOf(PikaDownloaderPrefs.INSTANCE.getPreferences().get("OutputFormat", OutputFormat.ChipTime.name()));
+    private String customFormat = PikaDownloaderPrefs.INSTANCE.getPreferences().get("CustomOutputFormat", "");
 
     private static final Map<String, String> bibChipMap = new HashMap();
 
@@ -152,17 +156,30 @@ public enum OutputProcessor {
             try {
                 if (!bufferedWriterMap.containsKey(outputFile)) {
                     try {
-                        File file = new File(PikaReceiverPrefs.INSTANCE.getOutputDir(), outputFile);
-                        FileWriter fw = new FileWriter(file, true);
-                        bufferedWriterMap.put(outputFile, new BufferedWriter(fw));
-                    } catch (IOException ex) {
+                        
+                        //File file = new File(PikaDownloaderPrefs.INSTANCE.getOutputDir(), outputFile);
+                        //FileWriter fw = new FileWriter(file, true);
+                        //bufferedWriterMap.put(outputFile, new BufferedWriter(fw));
+                        Path path = Paths.get(PikaDownloaderPrefs.INSTANCE.getOutputDir().getAbsolutePath(),outputFile);
+                        BufferedWriter bw = Files.newBufferedWriter(path, 
+                            StandardOpenOption.CREATE, 
+                            StandardOpenOption.APPEND);
+                        bufferedWriterMap.put(outputFile,bw);
+                        
+                        // If the file is empty, write out the header
+                        if (Files.size(path) == 0) {
+                            bw.write(getHeadder());
+                            bw.newLine();
+                            bw.flush();
+                        }
+                    } catch (Exception ex) {
                         logger.error(ex.getMessage());
                         return;
                     }
                 }
 
                 BufferedWriter outputFileBW = bufferedWriterMap.get(outputFile);
-
+                
                 // avoiding a lambda here so we can cleanly die if we have an exception
                 for (Read read : reads) {
                     outputFileBW.write(readToString(read));
@@ -184,23 +201,100 @@ public enum OutputProcessor {
 
     private String readToString(Read r) {
 
-        String output = "";
-        switch (outputFormat) {
+        // We are going to abuse the fact that
+        // dateTime returns "YYYY-MM-dd HH:MM:ss.SSS"
+        // and just split on the space
+        int firstSpace = r.dateTime().indexOf(' ');
+        String time = r.dateTime().substring(firstSpace + 1) ;
+        String date = r.dateTime().substring(0,firstSpace) ;
+                        
+        
+        return switch (outputFormat) {
             case RFIDServer_EXT ->
-                output = r.antenna().toString() + "," + r.chip() + "," + bibChipMap.getOrDefault(r.chip(), r.chip()) + ",\"" + r.dateTime() + "\"," + r.rfidReader().toString() + "," + r.antenna().toString();
-            case RFIDServer -> output = r.antenna().toString() + "," + r.chip() + "," + bibChipMap.getOrDefault(r.chip(), r.chip()) + ",\"" + r.dateTime().substring(r.dateTime().indexOf(" ") + 1) + "\""  ;
-            case Chip2Time ->
-                output = r.chip() + ",\"" + r.dateTime() + "\"";
-            case Bib2Time ->
-                output = bibChipMap.getOrDefault(r.chip(), r.chip()) + ",\"" + r.dateTime() + "\"";
-            case CUSTOM -> {
-                output = processCustomOutputString(r);
-            }
-        }
+                r.antenna().toString() + "," + r.chip() + "," + bibChipMap.getOrDefault(r.chip(), r.chip()) + ",\"" + r.dateTime() + "\"," + r.rfidReader().toString() + "," + r.antenna().toString();
+            case RFIDServer -> r.antenna().toString() + "," + r.chip() + "," + bibChipMap.getOrDefault(r.chip(), r.chip()) + ",\"" + time + "\""  ;
+            case ChipTime -> r.chip() + "," + time;
+            case BibTime -> bibChipMap.getOrDefault(r.chip(), r.chip()) + "," + time;
+            case ChipDateTime -> r.chip() + "," + time;
+            case BibDateTime -> bibChipMap.getOrDefault(r.chip(), r.chip()) + "," +  date + "," + time;
+            case CUSTOM -> processCustomOutputString(r); 
+        };
 
-        return output;
+        
     }
+    
+    private String getHeadder(){
+        return switch (outputFormat){
+            case RFIDServer_EXT -> "Ant,Chip,Bib,DateTime,reader,Ant";
+            case RFIDServer -> "Ant,Chip,Bib,Time";
+            case ChipTime -> "Chip,Time";
+            case BibTime -> "Bib,Time";
+            case ChipDateTime -> "Chip,Date,Time";
+            case BibDateTime -> "Bib,Date,Time";
+            case CUSTOM -> customOutputStringHeader(); 
+        };
+    }
+    
+    private String customOutputStringHeader() {
+        logger.debug("Creating header for customFormat: {}",customFormat);
+        if (customFormat == null) return "";
+        else if (customFormat.isBlank()) return "";
 
+        Matcher matcher = TOKEN_PATTERN.matcher(customFormat);
+        StringBuilder sb = new StringBuilder(customFormat.length());
+
+        while (matcher.find()) {
+            // Check if Group 1 found a backslash
+            boolean isEscaped = matcher.group(1) != null;
+
+            if (isEscaped) {
+                // Strip the backslash and keep the rest of the match exactly as literal text
+                String literalToken = matcher.group().substring(1);
+                matcher.appendReplacement(sb, Matcher.quoteReplacement(literalToken));
+                continue;
+            }
+
+            String tokenName;
+            String parameter = null;
+
+            // Determine if it was a %TOKEN or ${TOKEN} style match
+            if (matcher.group(2) != null) {
+                tokenName = matcher.group(2).toLowerCase();
+            } else {
+                tokenName = matcher.group(3).toLowerCase();
+                parameter = matcher.group(4);
+            }
+
+            // 2. Perform property replacement mapping
+            String replacement = switch (tokenName) {
+                case "b", "bib" -> "Bib";
+                case "c", "chip" -> "Chip";
+                case "a", "antenna" -> "Ant";
+                case "r", "reader" -> "Reader";
+                //case "dt", "datetime" ->
+                //    read.dateTime();
+                case "e", "epochmilli" -> "EpochMilli";
+                case "z","tz", "timezone" -> "Timezone";
+                case "d", "date" -> "Date";
+                case "t", "time" -> "Time";
+                case "dt", "datetime"-> "DateTime";
+                // Unrecognized properties return null here to trigger the default fallback logic
+                default ->
+                    null;
+            };
+
+            // 3. Fallback: If property is missing, leave the text completely intact
+            if (replacement == null) {
+                replacement = matcher.group();
+            }
+
+            matcher.appendReplacement(sb, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(sb);
+
+        return sb.toString();
+        
+    }
 
     private String processCustomOutputString(Read read) {
         logger.debug("Processing read with custom customFormat: {}",customFormat);

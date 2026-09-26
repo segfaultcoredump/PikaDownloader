@@ -32,7 +32,7 @@
          <children>
             <Button fx:id="addLocalButton" mnemonicParsing="false" text="Add Local Reader..." />
             <Pane maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
-            <Button fx:id="reviewReadsButton" mnemonicParsing="false" text="Review Reads..." />
+            <Button fx:id="reviewReadsButton" mnemonicParsing="false" text="Review Reads..." visible="false" />
          </children>
          <padding>
             <Insets bottom="2.0" left="2.0" right="2.0" top="2.0" />
@@ -72,7 +72,7 @@
                      <children>
                         <Button fx:id="setupChipBibButton" mnemonicParsing="false" text="Setup Chip -&gt; Bib" />
                         <Pane maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
-                        <ToggleSwitch fx:id="customBibMapToggleSwitch" maxWidth="1.7976931348623157E308" text="Use Bib -&gt; Chip Map" />
+                        <ToggleSwitch fx:id="customBibMapToggleSwitch" maxWidth="1.7976931348623157E308" prefHeight="24.0" prefWidth="188.0" text="Use Chip -&gt; Bib Map" />
                      </children>
                      <VBox.margin>
                         <Insets top="4.0" />

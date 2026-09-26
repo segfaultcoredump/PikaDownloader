@@ -48,7 +48,7 @@ import org.slf4j.LoggerFactory;
  * @author john
  */
 public class RemoteReader implements Reader {
-    static final Preferences prefs = PikaReceiverPrefs.INSTANCE.getPreferences();
+    static final Preferences prefs = PikaDownloaderPrefs.INSTANCE.getPreferences();
     static final Map<String,String> bibChipMap = OutputProcessor.INSTANCE.getBibChipMap();
 
     static final Logger logger = LoggerFactory.getLogger(RemoteReader.class);
@@ -214,7 +214,7 @@ public class RemoteReader implements Reader {
         if (outputFileBW == null){
             FileWriter fw = null;
             try {
-                File file = new File(PikaReceiverPrefs.INSTANCE.getOutputDir(),outputFileProperty.getValueSafe());
+                File file = new File(PikaDownloaderPrefs.INSTANCE.getOutputDir(),outputFileProperty.getValueSafe());
                 fw = new FileWriter(file,true);
                 outputFileBW = new BufferedWriter(fw);
             } catch (IOException ex) {
@@ -299,7 +299,7 @@ public class RemoteReader implements Reader {
             if (outputFileBW == null){
                 FileWriter fw = null;
                 try {
-                    File file = new File(PikaReceiverPrefs.INSTANCE.getOutputDir(),outputFileProperty.getValueSafe());
+                    File file = new File(PikaDownloaderPrefs.INSTANCE.getOutputDir(),outputFileProperty.getValueSafe());
                     fw = new FileWriter(file,true);
                     outputFileBW = new BufferedWriter(fw);
                 } catch (IOException ex) {

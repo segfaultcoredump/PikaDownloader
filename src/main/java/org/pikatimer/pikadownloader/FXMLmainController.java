@@ -55,8 +55,11 @@ import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
 import javafx.concurrent.Task;
+import javafx.fxml.FXMLLoader;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
+import javafx.scene.Parent;
+import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.ButtonBar;
@@ -72,7 +75,9 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
+import javafx.stage.Modality;
 import javafx.stage.Screen;
+import javafx.stage.Stage;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.slf4j.Logger;
@@ -86,9 +91,9 @@ import org.controlsfx.control.ToggleSwitch;
  */
 public class FXMLmainController {
 
-    static final Preferences prefs = PikaReceiverPrefs.INSTANCE.getPreferences();
+    static final Preferences prefs = PikaDownloaderPrefs.INSTANCE.getPreferences();
     static final Logger logger = LoggerFactory.getLogger(FXMLmainController.class);
-    static final PikaReceiverPrefs relayPrefs = PikaReceiverPrefs.INSTANCE;
+    static final PikaDownloaderPrefs relayPrefs = PikaDownloaderPrefs.INSTANCE;
     private static final Pattern REGEX_PATTERN = Pattern.compile("^\\p{XDigit}+$");
 
     private static final HttpClient httpClient = HttpClient.newBuilder()
@@ -102,6 +107,8 @@ public class FXMLmainController {
     @FXML    Label statusLabel;
     @FXML    Button outputDirButton;
     @FXML    TextField ouputDirTextField;
+    
+    @FXML    Button setupChipBibButton;
     @FXML    ToggleSwitch customBibMapToggleSwitch;
     @FXML    Button addLocalButton;
 
@@ -146,7 +153,7 @@ public class FXMLmainController {
 
         readerListView.setItems(readerList);
 
-        Label emptyMessage = new Label("Use the \"Local Reader...\" button to add a reader.");
+        Label emptyMessage = new Label("Use the \"Add Local Reader...\" button to add a reader.");
         readerListView.setPlaceholder(emptyMessage);
 
         // Disable stuff if we are connected
@@ -193,13 +200,14 @@ public class FXMLmainController {
 
         readerListView.setCellFactory(param -> new ReaderListCell());
 
+        setupChipBibButton.setOnAction(x -> {importBibChipMap();});
         customBibMapToggleSwitch.selectedProperty().addListener(a -> {
-            if (customBibMapToggleSwitch.isSelected()) {
+            if (customBibMapToggleSwitch.isSelected() && OutputProcessor.INSTANCE.getBibChipMap().isEmpty()) {
                 importBibChipMap();
             }
         });
 
-        // TODO: flip these to get / set the output formatter and custom format via OutputProcessor
+        
         outputFormatChoiceBox.setItems(FXCollections.observableArrayList(OutputFormat.values()));
 
         outputFormatChoiceBox.valueProperty().addListener((observable, oldValue, newValue) -> {
@@ -435,7 +443,7 @@ public class FXMLmainController {
 
     private void connect() {
 
-        File outputDir = PikaReceiverPrefs.INSTANCE.getOutputDir();
+        File outputDir = PikaDownloaderPrefs.INSTANCE.getOutputDir();
         if (outputDir == null || !outputDir.canWrite()) {
             disconnect();
             Alert alert = new Alert(AlertType.ERROR);
@@ -507,7 +515,7 @@ public class FXMLmainController {
             startStatusThread();
 
             prefs.put("Endpoint", endpoint);
-            PikaReceiverPrefs.INSTANCE.setEchoEndpoint(endpoint);
+            PikaDownloaderPrefs.INSTANCE.setRelayEndpoint(endpoint);
             connectButton.setText("Disconnect");
             statusLabel.setText("Connected to " + relayURLTextField.getText());
         } catch (Exception ex) {
@@ -658,7 +666,7 @@ public class FXMLmainController {
     }
 
     private void changeOutputDir() {
-        File selectedDirectory = PikaReceiverPrefs.INSTANCE.getOutputDir();
+        File selectedDirectory = PikaDownloaderPrefs.INSTANCE.getOutputDir();
         DirectoryChooser directoryChooser = new DirectoryChooser();
         if (selectedDirectory != null) {
             directoryChooser.setInitialDirectory(selectedDirectory);
@@ -669,72 +677,91 @@ public class FXMLmainController {
         if (selectedDirectory != null && selectedDirectory.isDirectory() && selectedDirectory.canWrite()) {
             ouputDirTextField.setText(selectedDirectory.getAbsolutePath());
             logger.debug(selectedDirectory.getAbsolutePath());
-            PikaReceiverPrefs.INSTANCE.setOutputDir(selectedDirectory);
+            PikaDownloaderPrefs.INSTANCE.setOutputDir(selectedDirectory);
         }
     }
 
     public void importBibChipMap() {
-        Map chipMap = OutputProcessor.INSTANCE.getBibChipMap();
-
-        FileChooser fileChooser = new FileChooser();
-        File sourceFile;
-        final BooleanProperty chipFirst = new SimpleBooleanProperty(false);
-
-        fileChooser.setTitle("Select Bib -> Chip File");
-
-        fileChooser.setInitialDirectory(new File(System.getProperty("user.home")));
-
-        fileChooser.getExtensionFilters().addAll(
-                new FileChooser.ExtensionFilter("Text Files", "*.txt", "*.csv"),
-                new FileChooser.ExtensionFilter("CSV Files", "*.csv"),
-                new FileChooser.ExtensionFilter("All files", "*")
-        );
-
-        sourceFile = fileChooser.showOpenDialog(customBibMapToggleSwitch.getScene().getWindow());
-        if (sourceFile != null) {
-            try {
-                Optional<String> fs = Files.lines(sourceFile.toPath()).findFirst();
-                String[] t = fs.get().split(",", -1);
-                if (t.length != 2) {
-                    return;
-                }
-
-                if (t[0].toLowerCase().contains("chip")) {
-                    chipFirst.set(true);
-                    logger.debug("Found a chip -> bib file");
-                } else if (t[0].toLowerCase().contains("bib")) {
-                    chipFirst.set(false);
-                    logger.debug("Found a bib -> chip file");
-                } else {
-                    chipMap.put(t[1], t[0]);
-                    chipFirst.set(false);
-                    logger.debug("No header in file. Assuming bib -> chip.");
-                    logger.trace("Mapped chip " + t[1] + " to " + t[0]);
-                }
-                Files.lines(sourceFile.toPath())
-                        .map(s -> s.trim())
-                        .filter(s -> !s.isEmpty())
-                        .skip(1)
-                        .forEach(s -> {
-                            //System.out.println("readOnce read " + s); 
-                            String[] tokens = s.split(",", -1);
-                            if (tokens.length != 2) {
-                                return;
-                            }
-                            if (chipFirst.get()) {
-                                chipMap.put(tokens[0], tokens[1]);
-                                logger.trace("Mapped chip " + tokens[0] + " to " + tokens[1]);
-                            } else {
-                                chipMap.put(tokens[1], tokens[0]);
-                                logger.trace("Mapped chip " + tokens[1] + " to " + tokens[0]);
-                            }
-                        });
-                logger.debug("Found a total of " + chipMap.size() + " mappings");
-
-            } catch (IOException ex) {
-                logger.warn(ex.getMessage());
-            }
+        
+        FXMLLoader fxmlLoader = new FXMLLoader(getClass().getResource("FXMLSetupBibMap.fxml"));
+        Parent chipMapRoot;
+        try {
+            
+            chipMapRoot = (Parent) fxmlLoader.load();
+            Stage stage = new Stage();
+            stage.initModality(Modality.APPLICATION_MODAL);
+            stage.setTitle("Chip to Bib Map Setup");
+            stage.setScene(new Scene(chipMapRoot));  
+            stage.showAndWait();
+        } catch (IOException ex) {
+            logger.warn("Error in setupCustomChipMap:",ex);
         }
+            
+        if (OutputProcessor.INSTANCE.getBibChipMap().isEmpty()) customBibMapToggleSwitch.setSelected(false); 
+        else customBibMapToggleSwitch.setSelected(true); 
+        
+//        
+//        Map chipMap = OutputProcessor.INSTANCE.getBibChipMap();
+//
+//        FileChooser fileChooser = new FileChooser();
+//        File sourceFile;
+//        final BooleanProperty chipFirst = new SimpleBooleanProperty(false);
+//
+//        fileChooser.setTitle("Select Bib -> Chip File");
+//
+//        fileChooser.setInitialDirectory(new File(System.getProperty("user.home")));
+//
+//        fileChooser.getExtensionFilters().addAll(
+//                new FileChooser.ExtensionFilter("Text Files", "*.txt", "*.csv"),
+//                new FileChooser.ExtensionFilter("CSV Files", "*.csv"),
+//                new FileChooser.ExtensionFilter("All files", "*")
+//        );
+//
+//        sourceFile = fileChooser.showOpenDialog(customBibMapToggleSwitch.getScene().getWindow());
+//        if (sourceFile != null) {
+//            try {
+//                Optional<String> fs = Files.lines(sourceFile.toPath()).findFirst();
+//                String[] t = fs.get().split(",", -1);
+//                if (t.length != 2) {
+//                    return;
+//                }
+//
+//                if (t[0].toLowerCase().contains("chip")) {
+//                    chipFirst.set(true);
+//                    logger.debug("Found a chip -> bib file");
+//                } else if (t[0].toLowerCase().contains("bib")) {
+//                    chipFirst.set(false);
+//                    logger.debug("Found a bib -> chip file");
+//                } else {
+//                    chipMap.put(t[1], t[0]);
+//                    chipFirst.set(false);
+//                    logger.debug("No header in file. Assuming bib -> chip.");
+//                    logger.trace("Mapped chip " + t[1] + " to " + t[0]);
+//                }
+//                Files.lines(sourceFile.toPath())
+//                        .map(s -> s.trim())
+//                        .filter(s -> !s.isEmpty())
+//                        .skip(1)
+//                        .forEach(s -> {
+//                            //System.out.println("readOnce read " + s); 
+//                            String[] tokens = s.split(",", -1);
+//                            if (tokens.length != 2) {
+//                                return;
+//                            }
+//                            if (chipFirst.get()) {
+//                                chipMap.put(tokens[0], tokens[1]);
+//                                logger.trace("Mapped chip " + tokens[0] + " to " + tokens[1]);
+//                            } else {
+//                                chipMap.put(tokens[1], tokens[0]);
+//                                logger.trace("Mapped chip " + tokens[1] + " to " + tokens[0]);
+//                            }
+//                        });
+//                logger.debug("Found a total of " + chipMap.size() + " mappings");
+//
+//            } catch (IOException ex) {
+//                logger.warn(ex.getMessage());
+//            }
+//        }
     }
 
     // TODO: Change this to a record

@@ -209,7 +209,7 @@ public class RemoteReaderCellController {
             command.put("rename_location", result.get());
             command.put("location", result.get());
         
-            String endpoint = PikaReceiverPrefs.INSTANCE.getEchoEndpoint();
+            String endpoint = PikaDownloaderPrefs.INSTANCE.getRelayEndpoint();
             
             logger.debug("Posting to " + endpoint + "commands/ : \n " + command.toString(4));
 
@@ -252,7 +252,7 @@ public class RemoteReaderCellController {
             command.put("rename_reader", result.get());
             command.put("location", result.get());
         
-            String endpoint = PikaReceiverPrefs.INSTANCE.getEchoEndpoint();
+            String endpoint = PikaDownloaderPrefs.INSTANCE.getRelayEndpoint();
             
             logger.debug("Posting to " + endpoint + "commands/ : \n " + command.toString(4));
 
@@ -299,7 +299,7 @@ public class RemoteReaderCellController {
         Optional<ButtonType> result = alert.showAndWait();
         if (result.get() == ButtonType.OK){
             // send the stop or start command...
-            String endpoint = PikaReceiverPrefs.INSTANCE.getEchoEndpoint();
+            String endpoint = PikaDownloaderPrefs.INSTANCE.getRelayEndpoint();
             
             logger.trace("Posting to " + endpoint + "commands/ : \n " + command.toString(4));
 
@@ -456,7 +456,7 @@ public class RemoteReaderCellController {
                 Task dataSyncTask = new Task<Void>() {
                     @Override protected Void call() {
 
-                        String endpoint =  PikaReceiverPrefs.INSTANCE.getEchoEndpoint();
+                        String endpoint =  PikaDownloaderPrefs.INSTANCE.getRelayEndpoint();
                         String mac = reader.getReaderIDProperty().getValueSafe();
 
                         logger.trace("remoteReaderCellController::Rewind Thread Starting ");
@@ -517,7 +517,7 @@ public class RemoteReaderCellController {
                 command.put("command", "REWIND " + startTimestamp.toString() + " " + endTimestamp.toString());
 
                 // send the rewind command...
-                String endpoint = PikaReceiverPrefs.INSTANCE.getEchoEndpoint();
+                String endpoint = PikaDownloaderPrefs.INSTANCE.getRelayEndpoint();
 
                 logger.trace("Posting to " + endpoint + "commands/ : \n " + command.toString(4));
 

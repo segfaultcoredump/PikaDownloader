@@ -48,7 +48,7 @@ import org.slf4j.LoggerFactory;
 public class LocalReaderCellController {
     static final Logger logger = LoggerFactory.getLogger(LocalReaderCellController.class);
 
-    private static final Preferences prefs = PikaReceiverPrefs.INSTANCE.getPreferences();
+    private static final Preferences prefs = PikaDownloaderPrefs.INSTANCE.getPreferences();
     
     private static final String errorCSS = """
         /* Custom error style for TitledPane */

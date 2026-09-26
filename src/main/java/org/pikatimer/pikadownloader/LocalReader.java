@@ -76,7 +76,7 @@ import org.json.JSONArray;
  * @author john
  */
 public class LocalReader implements Reader {
-    final Preferences prefs = PikaReceiverPrefs.INSTANCE.getPreferences();
+    final Preferences prefs = PikaDownloaderPrefs.INSTANCE.getPreferences();
     final Set<Read> processedReads = new HashSet();
     
     static final Logger logger = LoggerFactory.getLogger(LocalReader.class);

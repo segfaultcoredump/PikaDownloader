@@ -6,23 +6,19 @@
 package org.pikatimer.pikadownloader;
 
 import java.io.File;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.prefs.Preferences;
 
 /**
  *
  * @author john
  */
-public enum PikaReceiverPrefs {
+public enum PikaDownloaderPrefs {
     INSTANCE;
     
-    private static final Preferences prefs = Preferences.userRoot().node("PikaReceiver");
+    private static final Preferences prefs = Preferences.userRoot().node("PikaDownloader");
     private File outputDir = null;
     private String echoEndpoint = "";
-    
-    // TODO: Move this to the OutputProcessor
-    
+      
 
        
     public Preferences getPreferences(){
@@ -37,11 +33,11 @@ public enum PikaReceiverPrefs {
         outputDir = d;
     }
     
-    public String getEchoEndpoint(){
+    public String getRelayEndpoint(){
         return echoEndpoint;
     }
     
-    public void setEchoEndpoint(String e){
+    public void setRelayEndpoint(String e){
         echoEndpoint = e;
     }
     

@@ -25,8 +25,10 @@ package org.pikatimer.pikadownloader;
 
 public enum OutputFormat {
     
-    Chip2Time("Chip,Time"),
-    Bib2Time("Bib,Time"),
+    ChipTime("Chip,Time"),
+    BibTime("Bib,Time"),
+    ChipDateTime("Chip,Date,Time"),
+    BibDateTime("Bib,Date,Time"),
     RFIDServer("RFIDServer"),
     RFIDServer_EXT("RFIDServer (Extended)"),
     CUSTOM("Custom Format");

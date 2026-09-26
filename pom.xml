@@ -3,7 +3,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>org.pikatimer.PikaDownloader</groupId>
     <artifactId>PikaDownloader</artifactId>
-    <version>0.5</version>
+    <version>1.0</version>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.source>25</maven.compiler.source>
@@ -29,7 +29,7 @@
         <dependency>
             <groupId>org.controlsfx</groupId>
             <artifactId>controlsfx</artifactId>
-            <version>11.2.3</version>
+            <version>11.2.4</version>
         </dependency>
         <!-- https://mvnrepository.com/artifact/org.slf4j/slf4j-api -->
         <dependency>
@@ -47,7 +47,7 @@
         <dependency>
             <groupId>org.json</groupId>
             <artifactId>json</artifactId>
-            <version>20251224</version>
+            <version>20260719</version>
             <type>jar</type>
         </dependency>
         <dependency>
@@ -60,7 +60,7 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
-            <version>3.17.0</version>
+            <version>3.20.0</version>
         </dependency>
     </dependencies>
     <build>

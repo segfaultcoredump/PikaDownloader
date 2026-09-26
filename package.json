@@ -5,7 +5,7 @@
     "main": "index.js",
     "preferGlobal": true,
     "repository": {"url": "https://github.com/PikaTimer/PikaDownloader"},
-    "version": "0.5",
+    "version": "1.0",
     "jdeploy": {
         "args": [
             "-X[mac]dock:name=\"PikaDownloader\"",
@@ -32,12 +32,11 @@
                 "description": "Ability to scan the local network to detect PikaReader instances"
             }
         ],
-        "jar": "target/PikaDownloader-0.5-jar-with-dependencies.jar",
+        "jar": "target/PikaDownloader-1.0-jar-with-dependencies.jar",
         "javafx": true,
         "title": "PikaDownloader",
         "platformBundlesEnabled": false,
         "downloadPage": {"platforms": [
-            "mac-high-sierra",
             "mac-arm64",
             "debian-x64",
             "mac-x64",
