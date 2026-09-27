@@ -2,11 +2,13 @@ package org.pikatimer.pikadownloader;
 
 import java.net.URL;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Scene;
 import javafx.scene.layout.Pane;
 import javafx.stage.Stage;
 import javafx.geometry.Rectangle2D;
+import javafx.scene.Parent;
 import javafx.scene.image.Image;
 import javafx.stage.Screen;
 import org.apache.commons.lang3.SystemUtils;
@@ -28,16 +30,14 @@ public class Downloader extends Application {
 
 
         mainStage=primaryStage;
-        primaryStage.setTitle("Relay Receiver");
+        primaryStage.setTitle("Pika Downloader v1.0");
         
-        Pane myPane = (Pane)FXMLLoader.load(getClass().getResource("FXMLmain.fxml"));
+        Parent myPane = FXMLLoader.load(getClass().getResource("FXMLmain.fxml"));
         Scene myScene = new Scene(myPane);
         
-        Rectangle2D primaryScreenBounds = Screen.getPrimary().getVisualBounds();  
+        
   
-        //set Stage boundaries so that the main screen is centered.                
-        primaryStage.setX((primaryScreenBounds.getWidth() - primaryStage.getWidth())/2);  
-        primaryStage.setY((primaryScreenBounds.getHeight() - primaryStage.getHeight())/2);  
+        
  
         // Icons
         String[] sizes = {"256","128","64","48","32"};
@@ -65,7 +65,30 @@ public class Downloader extends Application {
             }
         }
         
+        //mainStage.setWidth(600);
+        //mainStage.setHeight(400);
+        
         primaryStage.setScene(myScene);
+        
+        Platform.runLater(() -> {
+        
+            Rectangle2D primaryScreenBounds = Screen.getPrimary().getVisualBounds();  
+            //set Stage boundaries so that the window is in the upper right   
+            logger.trace("Screen Size: {} x {}",primaryScreenBounds.getWidth(),primaryScreenBounds.getHeight());
+            logger.trace("Window Size: {} x {}",primaryStage.getWidth(),primaryStage.getHeight());
+
+            primaryStage.setX((primaryScreenBounds.getWidth() - primaryStage.getWidth()));  
+            primaryStage.setY(0);  
+            
+            // This will center it by default
+            //primaryStage.setX((primaryScreenBounds.getWidth() - primaryStage.getWidth())/2);  
+            //primaryStage.setY((primaryScreenBounds.getHeight() - primaryStage.getHeight())/2);
+        
+        });
+        
+        
+        
+        
         primaryStage.show();
         
         

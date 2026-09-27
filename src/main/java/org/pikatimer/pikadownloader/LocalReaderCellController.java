@@ -122,6 +122,8 @@ public class LocalReaderCellController {
         
         // Turn the TitlePane red if we have an issue
         errorState.addListener((observable, oldValue, newValue) -> {
+            logger.debug("New errorState value for {}: {}",unitNameLabel.textProperty().getValue(),newValue);
+            logger.trace("Error Stats: Battery: {}  Connection: {}",reader.getBatteryProperty().getValue(),reader.getLastUpdatedProperty().getValue());
             if (newValue) {
                 if (!titledPane.getStyleClass().contains("error-pane")) {
                     titledPane.getStyleClass().add("error-pane");
@@ -267,8 +269,8 @@ public class LocalReaderCellController {
         errorState.bind(
             reader.getLastUpdatedProperty().greaterThan(15)
             .or(
-                reader.getBatteryProperty().greaterThanOrEqualTo(0)
-                .and(reader.getBatteryProperty().lessThanOrEqualTo(25))
+                reader.getBatteryProperty().greaterThanOrEqualTo(0.0)
+                .and(reader.getBatteryProperty().lessThanOrEqualTo(0.25))
             )
         );
         
