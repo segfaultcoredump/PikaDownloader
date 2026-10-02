@@ -91,7 +91,7 @@ public class LocalReader implements Reader {
     private BooleanProperty readingProperty = new SimpleBooleanProperty(false);
     private BooleanProperty connectedProperty = new SimpleBooleanProperty(false);
     private StringProperty statusLabel = new SimpleStringProperty();
-    private DoubleProperty batteryProperty = new SimpleDoubleProperty(0.0);
+    private DoubleProperty batteryProperty = new SimpleDoubleProperty(-2);
     
     private StringProperty readerNameProperty = new SimpleStringProperty();
     
@@ -214,7 +214,7 @@ public class LocalReader implements Reader {
     private void processLine(String line) {
         JSONObject message = new JSONObject(line);
         String type = message.optString("type", "UNKNOWN");
-
+        logger.debug("LocalReader::processLine: {}",type);
         switch (type) {
             case "READ" ->  processRead(message, false);
             case "STATUS" ->  processStatus(message);
@@ -223,7 +223,7 @@ public class LocalReader implements Reader {
     }
 
     private void processStatus(JSONObject status) {
-        
+        logger.debug("Reader Status: {} -> {}",readerNameProperty.getValue(),status.toString());
         // Snag battery status       
         Platform.runLater(() -> {
             
@@ -231,9 +231,12 @@ public class LocalReader implements Reader {
             readerNameProperty.setValue(status.getString("unitID"));
             
             // Battery
-            if (status.has("battery") && status.getNumber("battery").doubleValue() > 0)
+            if (status.has("battery") && status.getNumber("battery").doubleValue() > 0) {
+                logger.trace("Recieved battery level of {}",status.getNumber("battery").doubleValue() );
                 batteryProperty.setValue(status.getNumber("battery").doubleValue() / 100.0);
-            else batteryProperty.setValue(-1);
+            } else batteryProperty.setValue(-1);
+            
+            logger.trace("Battery Level: {} set to {}",readerNameProperty.getValue(),batteryProperty.getValue());
 
             // Reading
             readingProperty.setValue(status.getBoolean("reading"));            
