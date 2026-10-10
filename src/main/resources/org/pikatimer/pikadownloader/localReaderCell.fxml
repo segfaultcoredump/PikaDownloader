@@ -68,7 +68,7 @@
                         </Label>
                         <Circle fx:id="readStatusCircle" fill="#585858" radius="9.0" stroke="BLACK" strokeType="INSIDE" />
                         <Label maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
-                        <Label fx:id="onlineStatusLabel" alignment="CENTER_RIGHT" contentDisplay="RIGHT" text="Online:" textAlignment="RIGHT">
+                        <Label fx:id="onlineStatusLabel" alignment="CENTER_RIGHT" contentDisplay="RIGHT" text="Connected:" textAlignment="RIGHT">
                            <font>
                               <Font name="System Bold" size="14.0" />
                            </font>

@@ -337,8 +337,8 @@ public enum OutputProcessor {
                     read.antenna().toString();
                 case "r", "reader" ->
                     read.rfidReader().toString();
-                //case "dt", "datetime" ->
-                //    read.dateTime();
+                case "s", "rssi" ->
+                    read.rssi().toString();
                 case "e", "epochmilli" ->
                     read.epochMilli().toString();
                 case "z","tz", "timezone" -> 

@@ -24,7 +24,7 @@ package org.pikatimer.pikadownloader;
 
 // Record class to hold the reads
 
-public record Read(Reader reader, String chip, Long epochMilli, String tz, String dateTime, Integer antenna, Integer rfidReader) {
+public record Read(Reader reader, String chip, Long epochMilli, String tz, String dateTime, Integer antenna, Integer rfidReader, Double rssi) {
     
 
 }

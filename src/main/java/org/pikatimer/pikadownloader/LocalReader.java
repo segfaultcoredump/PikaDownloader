@@ -257,13 +257,14 @@ public class LocalReader implements Reader {
         String chip = tagRead.getString("chip");
         Integer reader = tagRead.optInt("reader");
         Integer port = tagRead.optInt("antenna");
-        Long epochMilli = tagRead.optLong("epochMilli");
-        String dateTime = tagRead.optString("timestamp");
+        Long epochMilli = tagRead.getLong("epochMilli");
+        String dateTime = tagRead.getString("timestamp");
         String tz = tagRead.optString("tz");
+        Double rssi = tagRead.optDouble("rssi");
         
         // create the read record
         // Reader reader, String chip, Long epochMilli, String dateTime, Integer antenna, Integer rfidReader
-        Read read = new Read(this,chip,epochMilli, tz, dateTime, port, reader);
+        Read read = new Read(this,chip,epochMilli, tz, dateTime, port, reader, rssi);
         
         if(! rewind && processedReads.contains(read)){ 
             return;

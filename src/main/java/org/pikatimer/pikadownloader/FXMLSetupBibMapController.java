@@ -30,6 +30,7 @@ import java.util.regex.PatternSyntaxException;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.ReadOnlyStringWrapper;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
@@ -126,10 +127,10 @@ public class FXMLSetupBibMapController  {
         sortedTimeList.comparatorProperty().bind(bibMappingTableView.comparatorProperty());
         
         // 5. Set the cell factories and stort routines... 
-        bibTableColumn.setCellValueFactory(b -> b.getValue().bibProperty());
+        bibTableColumn.setCellValueFactory(b -> new ReadOnlyStringWrapper(b.getValue().bib()));
         bibTableColumn.setComparator(new AlphanumericComparator());
         
-        chipTableColumn.setCellValueFactory(c -> c.getValue().chipProperty());
+        chipTableColumn.setCellValueFactory(c -> new ReadOnlyStringWrapper(c.getValue().chip()));
         chipTableColumn.setComparator(new AlphanumericComparator());
 
         bibMappingTableView.setItems(sortedTimeList);
@@ -288,16 +289,15 @@ public class FXMLSetupBibMapController  {
                         chipFirst.set(false);
                         logger.debug("Found a bib -> chip file");
                     } else {
-                        ChipMap newMapping = new ChipMap(t[0],t[1]);
-                        if (chipMapList.contains(newMapping)){
-                            chipMapList.get(chipMapList.indexOf(newMapping)).bibProperty.set(newMapping.bibProperty.get());
-                        } else {
-                            chipMapList.add(newMapping);
-                        }
+                        ChipMap newMapping = new ChipMap(t[1],t[0]);
+                        if (chipMapList.contains(newMapping)) chipMapList.remove(newMapping);
+        
+                        chipMapList.add(newMapping);
+                        
                         mapModified.setValue(true);    
                         
-                        logger.debug("No header in file");
-                        logger.debug("Mapped chip " + t[0] + " to " + t[1]);
+                        logger.debug("No header in file. Assuming bib -> chip.");
+                        logger.debug("Mapped chip " + t[1] + " to " + t[0]);
                     }
                     Files.lines(sourceFile.toPath())
                         .map(s -> s.trim())
@@ -316,11 +316,10 @@ public class FXMLSetupBibMapController  {
                                 logger.debug("Mapped chip " + tokens[1] + " to " + tokens[0]);
                             }
                             
-                            if (chipMapList.contains(newMapping)){
-                                chipMapList.get(chipMapList.indexOf(newMapping)).bibProperty.set(newMapping.bibProperty.get());
-                            } else {
-                                chipMapList.add(newMapping);
-                            }
+                            if (chipMapList.contains(newMapping)) chipMapList.remove(newMapping);
+        
+                            chipMapList.add(newMapping);
+                            
                             mapModified.setValue(true);
                             
                             
@@ -356,11 +355,9 @@ public class FXMLSetupBibMapController  {
                 bib = i;
                 chip = i + offset;
                 ChipMap newMapping = new ChipMap(chip.toString(),bib.toString());
-                if (chipMapList.contains(newMapping)){
-                    chipMapList.get(chipMapList.indexOf(newMapping)).bibProperty.set(newMapping.bibProperty.get());
-                } else {
-                    chipMapList.add(newMapping);
-                }
+                if (chipMapList.contains(newMapping)) chipMapList.remove(newMapping);
+        
+                chipMapList.add(newMapping);
                 mapModified.setValue(true);
             }
             
@@ -373,11 +370,10 @@ public class FXMLSetupBibMapController  {
     }
     public void addMappingButtonAction(ActionEvent fxevent){
         ChipMap newMapping = new ChipMap(chipTextField.getText(),bibTextField.getText());
-        if (chipMapList.contains(newMapping)){
-            chipMapList.get(chipMapList.indexOf(newMapping)).bibProperty.set(newMapping.bibProperty.get());
-        } else {
-            chipMapList.add(newMapping);
-        }
+        if (chipMapList.contains(newMapping)) chipMapList.remove(newMapping);
+        
+        chipMapList.add(newMapping);
+        
         mapModified.setValue(true);  
         
         chipTextField.setText("");
@@ -396,7 +392,7 @@ public class FXMLSetupBibMapController  {
         try {
         Map<String,String> bibMap = new ConcurrentHashMap();
         
-        chipMapList.forEach(m -> bibMap.put(m.chipProperty().getValueSafe(), m.bibProperty().getValueSafe()));
+        chipMapList.forEach(m -> bibMap.put(m.chip(), m.bib()));
                 
         OutputProcessor.INSTANCE.getBibChipMap().clear();
         OutputProcessor.INSTANCE.getBibChipMap().putAll(bibMap);
@@ -406,18 +402,10 @@ public class FXMLSetupBibMapController  {
         
         
         Stage stage = (Stage) ((Node) fxevent.getSource()).getScene().getWindow();
-        //Platform.runLater(() -> {
             if (stage != null) {
                 logger.debug("Calling stage.close()");
                 stage.close();
             }
-        //});
-//        ((Node) fxevent.getSource()).getScene().getWindow().fireEvent(
-//            new WindowEvent((
-//                    (Node) fxevent.getSource()).getScene().getWindow(),
-//                    WindowEvent.WINDOW_CLOSE_REQUEST
-//            )
-//        );
         } catch (Exception e) {
         logger.error("Failed to save and close window", e);
         e.printStackTrace(); // Ensures it prints to your standard console output
@@ -450,8 +438,8 @@ public class FXMLSetupBibMapController  {
                 Pattern pattern =  Pattern.compile(lowerCaseFilter, Pattern.CASE_INSENSITIVE);
 
                 if (    
-                        pattern.matcher(chipMap.chipProperty().getValueSafe()).matches() ||
-                        pattern.matcher(chipMap.bibProperty().getValueSafe()).matches()) {
+                        pattern.matcher(chipMap.chip()).matches() ||
+                        pattern.matcher(chipMap.bib()).matches()) {
                     return true; // Filter matches first/last/bib.
                 } 
 
@@ -463,46 +451,22 @@ public class FXMLSetupBibMapController  {
         });
     }
 
-    private static class ChipMap {
-        private final StringProperty chipProperty = new SimpleStringProperty();
-        private final StringProperty bibProperty = new SimpleStringProperty();
-        
-        public ChipMap() {
-        }
-        
-        public ChipMap(String c, String b) {
-            chipProperty.setValue(c);
-            bibProperty.setValue(b);
-        }
-        
-        public StringProperty chipProperty(){
-            return chipProperty;
-        }
-        public StringProperty bibProperty(){
-            return bibProperty;
-        }
-        
+    
+    private record ChipMap (String chip, String bib){
         @Override
-        public boolean equals(Object obj) {
-        
-        if (obj == null) {
-            return false;
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            ChipMap user = (ChipMap) o;
+            // Strictly check the 'id' field
+            return Objects.equals(chip, user.chip);
         }
-        if (getClass() != obj.getClass()) {
-            return false;
-        }
-        final ChipMap other = (ChipMap) obj;
-        
-        return Objects.equals(this.chipProperty.getValue(), other.chipProperty.getValue());
-    }
 
         @Override
         public int hashCode() {
-            int hash = 7;
-            hash = 31 * hash + Objects.hashCode(this.chipProperty);
-            return hash;
+            // Compute the hash using only the 'id' field
+            return Objects.hash(chip);
         }
-        
     }
     
 }
