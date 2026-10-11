@@ -37,6 +37,8 @@ import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.prefs.Preferences;
 import javafx.animation.Animation;
@@ -84,7 +86,7 @@ public class LocalReader implements Reader {
     private StringProperty readerIPProperty = new SimpleStringProperty();
     private StringProperty readerPortProperty = new SimpleStringProperty();
     
-    private StringProperty readerIDProperty = new SimpleStringProperty();
+    //private StringProperty readerIDProperty = new SimpleStringProperty();
     private Pane controlPane  = null;
     private LocalReaderCellController cellController = null;
     
@@ -114,7 +116,7 @@ public class LocalReader implements Reader {
     
     public LocalReader(String reader_ip, String port, String reader_id){
         readerIPProperty.setValue(reader_ip); 
-        readerIDProperty.setValue(reader_id);
+        //readerIDProperty.setValue(reader_id);
         readerNameProperty.setValue(reader_id);
         readerPortProperty.setValue(port);
         
@@ -190,7 +192,7 @@ public class LocalReader implements Reader {
                     logger.debug("Connecting to wsPikaURL: " + wsPikaURL);
                     webSocketClient = new EventWebSocketClient(wsPikaURL, reader);
                     webSocketClient.setDaemon(true);
-                    webSocketClient.connectBlocking(60, TimeUnit.SECONDS);
+                    webSocketClient.connectBlocking(10, TimeUnit.SECONDS);
                     
 
                     Platform.runLater(() -> {
@@ -201,6 +203,7 @@ public class LocalReader implements Reader {
                         }
                     });
                 } catch (Exception ex) {
+                    logger.error("ReacerConnection error: {} {}",readerNameProperty.getValueSafe(),ex.getMessage(),ex);
                 }
                 return null;
             }
@@ -249,7 +252,7 @@ public class LocalReader implements Reader {
 
     private void processRead(JSONObject tagRead, Boolean rewind) {
         //  {"antenna":3,"chip":"23210006","rssi":-71,"reader":1,"tz":"-07:00","epochMilli":1703796324476,"type":"READ","timestamp":"2023-12-28 13:45:24.476"}
-        logger.trace("Chip Read for {}: {}", readerIDProperty.getValueSafe(),tagRead);
+        logger.trace("Chip Read for {}: {}", readerNameProperty.getValueSafe(),tagRead);
         
         
 
@@ -280,10 +283,10 @@ public class LocalReader implements Reader {
         
     }
 
-    @Override
-    public StringProperty getReaderIDProperty() {
-        return readerIDProperty;
-    }
+//    @Override
+//    public StringProperty getReaderIDProperty() {
+//        return readerIDProperty;
+//    }
     
     public BooleanProperty getReadingProperty() {
         return readingProperty;
@@ -508,7 +511,12 @@ public class LocalReader implements Reader {
     }
     
     private class EventWebSocketClient extends WebSocketClient {
-
+        private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable);
+            thread.setDaemon(true); // <-- This is the key line
+            thread.setName("ws-reconnect-thread"); // Optional: Helps with debugging
+            return thread;
+        });
         private Integer messageCounter = 0;
         private String wsURI;
         LocalReader reader;
@@ -529,8 +537,20 @@ public class LocalReader implements Reader {
 
         @Override
         public void onClose(int code, String reason, boolean remote) {
-            logger.debug("closed with exit code " + code + " additional info: " + reason);
-
+            logger.error("Reader {} closed with exit code {}: {}",reader.getReaderNameProperty().getValue(), code, reason);
+            
+            // OFF-THREAD RECONNECT:
+            // Schedule a reconnection task in the background after 5 seconds
+            scheduler.schedule(() -> {
+                System.out.println("Attempting to reconnect...");
+                try {
+                    // reconnectBlocking() is safe here because it runs on the executor thread
+                    this.reconnectBlocking(); 
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    System.err.println("Reconnection was interrupted.");
+                }
+            }, 5, TimeUnit.SECONDS); 
         }
 
         @Override

@@ -116,7 +116,7 @@ public class RemoteReaderCellController {
     public void setReader(RemoteReader r){
         reader = r;
         // MAC address
-        String mac = reader.getReaderIDProperty().getValueSafe();
+        String mac = reader.getReaderNameProperty().getValueSafe();
         macLabel.textProperty().set(mac.substring(0, 2) + ":" + mac.substring(2, 4)+ ":" + mac.substring(4, 6));
         
         // Name and Location
@@ -202,10 +202,10 @@ public class RemoteReaderCellController {
         // Traditional way to get the response value.
         Optional<String> result = dialog.showAndWait();
         if (result.isPresent()){
-            logger.debug("Changing reader " + reader.getReaderIDProperty().getValueSafe() + " location string to " + result.get());
+            logger.debug("Changing reader " + reader.getReaderNameProperty().getValueSafe() + " location string to " + result.get());
             
              JSONObject command = new JSONObject();
-            command.put("mac", reader.getReaderIDProperty().getValueSafe());
+            command.put("mac", reader.getReaderNameProperty().getValueSafe());
             command.put("rename_location", result.get());
             command.put("location", result.get());
         
@@ -239,16 +239,16 @@ public class RemoteReaderCellController {
     private void updateUnitNameText() {
         TextInputDialog dialog = new TextInputDialog(reader.getReaderNameProperty().getValueSafe());
         dialog.setTitle("Change Reader Name");
-        dialog.setHeaderText("Update Name for "+ reader.getReaderIDProperty().getValueSafe());
+        dialog.setHeaderText("Update Name for "+ reader.getReaderNameProperty().getValueSafe());
         dialog.setContentText("New Name:");
 
         // Traditional way to get the response value.
         Optional<String> result = dialog.showAndWait();
         if (result.isPresent()){
-            logger.debug("Changing reader " + reader.getReaderIDProperty().getValueSafe() + " location string to " + result.get());
+            logger.debug("Changing reader " + reader.getReaderNameProperty().getValueSafe() + " location string to " + result.get());
             
              JSONObject command = new JSONObject();
-            command.put("mac", reader.getReaderIDProperty().getValueSafe());
+            command.put("mac", reader.getReaderNameProperty().getValueSafe());
             command.put("rename_reader", result.get());
             command.put("location", result.get());
         
@@ -285,7 +285,7 @@ public class RemoteReaderCellController {
         alert.setTitle("Start/Stop Reader");
         
         JSONObject command = new JSONObject();
-        command.put("mac", reader.getReaderIDProperty().getValueSafe());
+        command.put("mac", reader.getReaderNameProperty().getValueSafe());
         if (currentStatus == true) {
             alert.setHeaderText("Stop Remote Reader");
             alert.setContentText("This will stop the remote reader.\nAre you ok with this?");
@@ -457,7 +457,7 @@ public class RemoteReaderCellController {
                     @Override protected Void call() {
 
                         String endpoint =  PikaDownloaderPrefs.INSTANCE.getRelayEndpoint();
-                        String mac = reader.getReaderIDProperty().getValueSafe();
+                        String mac = reader.getReaderNameProperty().getValueSafe();
 
                         logger.trace("remoteReaderCellController::Rewind Thread Starting ");
 
@@ -507,13 +507,13 @@ public class RemoteReaderCellController {
                 if (logger.isDebugEnabled()) {
                     String from = LocalDateTime.of(rwd.startDate, LocalTime.ofSecondOfDay(rwd.startTime.getSeconds())).toString().replace("T", " ");
                     String to = LocalDateTime.of(rwd.endDate, LocalTime.ofSecondOfDay(rwd.endTime.getSeconds())).toString().replace("T", " ");
-                    String mac = reader.getReaderIDProperty().getValueSafe();
+                    String mac = reader.getReaderNameProperty().getValueSafe();
                     logger.debug("Rewinding from Reader: " + mac + " from " + from + " -> " + to);
                 }
 
-                logger.debug("Reader " + reader.getReaderIDProperty().getValueSafe() + " Rewind from " + startTimestamp + " to " + endTimestamp);
+                logger.debug("Reader " + reader.getReaderNameProperty().getValueSafe() + " Rewind from " + startTimestamp + " to " + endTimestamp);
                 JSONObject command = new JSONObject();
-                command.put("mac", reader.getReaderIDProperty().getValueSafe());
+                command.put("mac", reader.getReaderNameProperty().getValueSafe());
                 command.put("command", "REWIND " + startTimestamp.toString() + " " + endTimestamp.toString());
 
                 // send the rewind command...

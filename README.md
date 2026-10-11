@@ -27,6 +27,7 @@ The system accepts a string with embeded escape codes that represent various fie
 | E          | EpochMilli     | Milliseconds since the EPOC | 1784481043524           |
 | A          | Antenna        | Antenna Number              | 1                       |
 | R          | Reader         | Reader Number               | 2                       |
+| s          | rssi           | RSSI in dBm                 | -41.2                   |
 
 ## Examples
 

@@ -27,7 +27,7 @@ import javafx.scene.layout.Pane;
 public interface Reader {
     public Pane getControlPane();
     
-    public StringProperty getReaderIDProperty();
+    //public StringProperty getReaderIDProperty();
     public StringProperty getReaderNameProperty();
     public StringProperty getOutputFileProperty();
     public BooleanProperty getOutputToFileProperty();

@@ -163,10 +163,10 @@ public class RemoteReader implements Reader {
     }
 
     
-    @Override
-    public StringProperty getReaderIDProperty() {
-        return readerIDProperty;
-    }
+//    @Override
+//    public StringProperty getReaderIDProperty() {
+//        return readerIDProperty;
+//    }
 
     public IntegerProperty getBatteryProperty() {
         return batteryProperty;

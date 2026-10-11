@@ -33,7 +33,7 @@ public class ReaderListCell  extends ListCell<Reader>  {
     protected void updateItem(Reader r, boolean empty) {
         super.updateItem(r, empty);
 
-        if (empty || r == null || r.getReaderIDProperty().isEmpty().get()) {
+        if (empty || r == null || r.getReaderNameProperty().isEmpty().get()) {
             setText(null);
             setGraphic(null);
         } else {
@@ -56,7 +56,7 @@ public class ReaderListCell  extends ListCell<Reader>  {
 
             Dragboard dragboard = startDragAndDrop(TransferMode.MOVE);
             ClipboardContent content = new ClipboardContent();
-            content.putString(getItem().getReaderIDProperty().getValueSafe());
+            content.putString(getItem().getReaderNameProperty().getValueSafe());
             
             // Snapshot the rVBox node image and 
             // set that as the dragable image
@@ -105,7 +105,7 @@ public class ReaderListCell  extends ListCell<Reader>  {
                 
                 int draggedIdx = -1;
                 for (int i = 0; i < items.size(); i++) {
-                    if (items.get(i).getReaderIDProperty().getValueSafe().equals(db.getString())) draggedIdx = i;
+                    if (items.get(i).getReaderNameProperty().getValueSafe().equals(db.getString())) draggedIdx = i;
                 }
                 
                 if (draggedIdx > -1) {
