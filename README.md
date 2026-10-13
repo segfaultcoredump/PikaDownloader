@@ -1,4 +1,4 @@
-# PikaReciever
+# PikaDownloader
 Permits downloading timing data from a [PikaReader](https://github.com/PikaTimer/PikaReader) based system to a local text file. 
 
 
