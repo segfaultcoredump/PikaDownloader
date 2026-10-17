@@ -5,7 +5,6 @@ import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Scene;
-import javafx.scene.layout.Pane;
 import javafx.stage.Stage;
 import javafx.geometry.Rectangle2D;
 import javafx.scene.Parent;
@@ -30,7 +29,7 @@ public class Downloader extends Application {
 
 
         mainStage=primaryStage;
-        primaryStage.setTitle("Pika Downloader v1.0");
+        primaryStage.setTitle("Pika Downloader v1.0 Beta 3");
         
         Parent myPane = FXMLLoader.load(getClass().getResource("FXMLmain.fxml"));
         Scene myScene = new Scene(myPane);
