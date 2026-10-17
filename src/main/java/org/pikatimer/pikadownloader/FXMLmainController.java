@@ -91,9 +91,8 @@ import org.controlsfx.control.ToggleSwitch;
  */
 public class FXMLmainController {
 
-    static final Preferences prefs = PikaDownloaderPrefs.INSTANCE.getPreferences();
     static final Logger logger = LoggerFactory.getLogger(FXMLmainController.class);
-    static final PikaDownloaderPrefs relayPrefs = PikaDownloaderPrefs.INSTANCE;
+    static final PikaDownloaderPrefs pikaPrefs = PikaDownloaderPrefs.INSTANCE;
     private static final Pattern REGEX_PATTERN = Pattern.compile("^\\p{XDigit}+$");
 
     private static final HttpClient httpClient = HttpClient.newBuilder()
@@ -131,7 +130,7 @@ public class FXMLmainController {
      */
     public void initialize() {
         // Set the default values from previous runs
-        String endpoint = prefs.get("Endpoint", "");
+        String endpoint = pikaPrefs.getPreferences().get("Endpoint", "");
 
         addLocalButton.setOnAction(event -> {
             addLocalDialog();
@@ -514,7 +513,7 @@ public class FXMLmainController {
             // setup thread to continue to poll reader status
             startStatusThread();
 
-            prefs.put("Endpoint", endpoint);
+            pikaPrefs.getPreferences().put("Endpoint", endpoint);
             PikaDownloaderPrefs.INSTANCE.setRelayEndpoint(endpoint);
             connectButton.setText("Disconnect");
             statusLabel.setText("Connected to " + relayURLTextField.getText());
@@ -666,7 +665,16 @@ public class FXMLmainController {
     }
 
     private void changeOutputDir() {
-        File selectedDirectory = PikaDownloaderPrefs.INSTANCE.getOutputDir();
+        File selectedDirectory = pikaPrefs.getOutputDir();
+        
+        // If it has not been set yet, pull from the prefs
+        // Default to the user's home directory
+        if (selectedDirectory == null) {
+            String defaultOutputDir = pikaPrefs.getPreferences().get("outputDir", System.getProperty("user.home"));
+            selectedDirectory = Path.of(defaultOutputDir).toFile();
+        }
+        
+        
         DirectoryChooser directoryChooser = new DirectoryChooser();
         if (selectedDirectory != null) {
             directoryChooser.setInitialDirectory(selectedDirectory);
@@ -677,7 +685,8 @@ public class FXMLmainController {
         if (selectedDirectory != null && selectedDirectory.isDirectory() && selectedDirectory.canWrite()) {
             ouputDirTextField.setText(selectedDirectory.getAbsolutePath());
             logger.debug(selectedDirectory.getAbsolutePath());
-            PikaDownloaderPrefs.INSTANCE.setOutputDir(selectedDirectory);
+            pikaPrefs.setOutputDir(selectedDirectory);
+            pikaPrefs.getPreferences().put("outputDir", selectedDirectory.getAbsolutePath());
         }
     }
 

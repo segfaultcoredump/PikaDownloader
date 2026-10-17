@@ -18,13 +18,11 @@ public enum PikaDownloaderPrefs {
     private static final Preferences prefs = Preferences.userRoot().node("PikaDownloader");
     private File outputDir = null;
     private String echoEndpoint = "";
-      
-
-       
+           
     public Preferences getPreferences(){
         return prefs;
     }
-    
+
     public File getOutputDir(){
         return outputDir;
     }

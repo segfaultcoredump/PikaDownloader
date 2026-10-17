@@ -20,11 +20,13 @@ import org.pikatimer.pikadownloader.util.AlphanumericComparator;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.UnaryOperator;
+import java.util.prefs.Preferences;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import javafx.application.Platform;
@@ -32,8 +34,6 @@ import javafx.beans.binding.Bindings;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ReadOnlyStringWrapper;
 import javafx.beans.property.SimpleBooleanProperty;
-import javafx.beans.property.SimpleStringProperty;
-import javafx.beans.property.StringProperty;
 import javafx.beans.value.ObservableValue;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -63,6 +63,8 @@ import org.slf4j.LoggerFactory;
  */
 public class FXMLSetupBibMapController  {
     private static final Logger logger = LoggerFactory.getLogger(FXMLSetupBibMapController.class);
+    private static final Preferences pikaPrefs = PikaDownloaderPrefs.INSTANCE.getPreferences();
+
 
     @FXML private TableView<ChipMap> bibMappingTableView;
     @FXML private TableColumn<ChipMap,String> chipTableColumn;
@@ -267,7 +269,8 @@ public class FXMLSetupBibMapController  {
         
         fileChooser.setTitle("Select Bib -> Chip File");
         
-        fileChooser.setInitialDirectory(new File(System.getProperty("user.home"))); 
+        String defaultDirectory = pikaPrefs.get("BibChipFileDir", System.getProperty("user.home"));
+        fileChooser.setInitialDirectory(Path.of(defaultDirectory).toFile()); 
         
         fileChooser.getExtensionFilters().addAll(
                 new FileChooser.ExtensionFilter("Text Files", "*.txt","*.csv"),
@@ -277,6 +280,7 @@ public class FXMLSetupBibMapController  {
         
         sourceFile = fileChooser.showOpenDialog(importButton.getScene().getWindow());
         if (sourceFile != null) {
+            pikaPrefs.put("BibChipFileDir", sourceFile.getParentFile().getAbsolutePath());
             try {            
                     Optional<String> fs = Files.lines(sourceFile.toPath()).findFirst();
                     String[] t = fs.get().split(",", -1);
