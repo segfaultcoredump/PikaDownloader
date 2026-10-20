@@ -179,15 +179,15 @@ public class LocalReaderCellController {
             if (progress < 0) battHBox.setVisible(false);
             else battHBox.setVisible(true);
             
-            if (progress < 0.25) {
-                // Under 10%: Charcoal Grey
-                batteryLevelProgressBar.setStyle("-fx-accent: #222222;");
+            if (progress < 0.20) {
+                // Under 20%: Red
+                batteryLevelProgressBar.setStyle("-fx-accent: #FF3300;");
             } else if (progress > 0.50) {
-                // Over 50%: Deep Blue
+                // Over 50%: // Vibrant Mint Teal
                 batteryLevelProgressBar.setStyle("-fx-accent: #00A37A;");
             } else {
-                // Between 25% and 50%: Dark Orange
-                batteryLevelProgressBar.setStyle("-fx-accent: #D55E00;");
+                // Between 25% and 50%: Yellow
+                batteryLevelProgressBar.setStyle("-fx-accent: #dede17;");
             }
         });
         batteryLevelProgressBar.progressProperty().bind(reader.getBatteryProperty());
@@ -226,14 +226,14 @@ public class LocalReaderCellController {
 
         reader.getLastUpdatedProperty().addListener((ov, o, u) -> {
             logger.debug("Reader updated Property listener fired " + o + " -> " + u);
-            if (u.intValue() < 5) {
+            if (u.intValue() < 2) {
                 onlineStatusCircle.setFill(Color.web("#00A37A")); // Vibrant Mint Teal
                 onlineStatusLabel.textProperty().setValue("Connected:");
-            } else if (u.intValue() < 15) {
-                onlineStatusCircle.setFill(Color.web("#D55E00")); // Dark Orange
+            } else if (u.intValue() < 10) {
+                onlineStatusCircle.setFill(Color.web("#FFFF33")); // Yellow
                 onlineStatusLabel.textProperty().setValue("Last Seen: " + u);
             } else {
-                onlineStatusCircle.setFill(Color.web("#222222")); // Charcoal Grey
+                onlineStatusCircle.setFill(Color.web("#FF3300")); // Red
                 onlineStatusLabel.textProperty().setValue("Disconnected:");
             }
         });
@@ -267,10 +267,10 @@ public class LocalReaderCellController {
         // enter an error state if the battery is below 25 or 
         // we have not heard from the unit in 15 seconds
         errorState.bind(
-            reader.getLastUpdatedProperty().greaterThan(15)
+            reader.getLastUpdatedProperty().greaterThan(10)
             .or(
                 reader.getBatteryProperty().greaterThanOrEqualTo(0.0)
-                .and(reader.getBatteryProperty().lessThanOrEqualTo(0.25))
+                .and(reader.getBatteryProperty().lessThanOrEqualTo(0.20))
             )
         );
         
