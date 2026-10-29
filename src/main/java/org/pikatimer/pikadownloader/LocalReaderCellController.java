@@ -18,6 +18,7 @@ package org.pikatimer.pikadownloader;
 
 import java.util.Optional;
 import java.util.prefs.Preferences;
+import javafx.application.HostServices;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.fxml.FXML;
@@ -103,6 +104,9 @@ public class LocalReaderCellController {
     @FXML Label lastReadLabel;
     @FXML Label ipLabel;
     
+    @FXML Button disconnectButton;
+    @FXML Button removeButton;
+    
     BooleanProperty errorState = new SimpleBooleanProperty(false);
     
 //    UnaryOperator<Change> filter = change -> {
@@ -133,7 +137,24 @@ public class LocalReaderCellController {
             }
         });
         
+        disconnectButton.setOnAction(x -> {
+            if (reader != null) {
+                if (! reader.isEnabled().get()) {
+                    reader.enable();
+                    disconnectButton.textProperty().setValue("Disconnect");
+                } else {
+                    reader.disable();
+                    disconnectButton.textProperty().setValue("Reconnect");
+                }
+            }
+        });
         
+        removeButton.setOnAction(x -> {
+            if (reader != null) {
+                reader.disable();
+                PikaDownloaderPrefs.INSTANCE.getReaderList().remove(reader);
+            }        
+        });
 
     } 
     
@@ -142,15 +163,27 @@ public class LocalReaderCellController {
         
         ipLabel.setText(reader.getReaderIPProperty().getValueSafe());
         ipLabel.setOnMouseClicked(event -> {
-            if (event.getButton() == MouseButton.PRIMARY) {
-                //HostServices hostServices = getHostServices();
-                //hostServices.showDocument("http://" + reader.reader_ip + ":8080");
+            logger.debug("ipLabel Click event detected: {} and {}",event.getButton(),event.getClickCount());
+            if (event.getButton() == MouseButton.PRIMARY && event.getClickCount() == 2) {
+                HostServices hostServices = PikaDownloaderPrefs.INSTANCE.getApplication().getHostServices();
+                String url = "http://" + reader.getReaderIPProperty().getValue() + ":" +  reader.getReaderPortProperty().getValue();
+                logger.debug("Opening {}",url);
+                hostServices.showDocument(url);
             }
         });
         
         // Name and Location
         
         unitNameLabel.textProperty().bind(reader.getReaderNameProperty());
+        unitNameLabel.setOnMouseClicked(event -> {
+            logger.debug("unitNameLabel Click event detected: {} and {}",event.getButton(),event.getClickCount());
+            if (event.getButton() == MouseButton.PRIMARY && event.getClickCount() == 2) {
+                HostServices hostServices = PikaDownloaderPrefs.INSTANCE.getApplication().getHostServices();
+                String url = "http://" + reader.getReaderNameProperty().getValue() + ".local:" +  reader.getReaderPortProperty().getValue();
+                logger.debug("Opening {}",url);
+                hostServices.showDocument(url);
+            }
+        });
         
         // Set the titledPane display
         HBox titledPaneContent = new HBox();
@@ -168,11 +201,8 @@ public class LocalReaderCellController {
         
         titledPaneContent.setAlignment(Pos.CENTER_LEFT);
         titledPane.setGraphic(titledPaneContent);
-        
-        // Colors chosen to work with colorblind (red/green and full monochrome) viewers
-        
+              
         // Battery Level
-        
         batteryLevelProgressBar.progressProperty().addListener((observable, oldValue, newValue) -> {
             double progress = newValue.doubleValue();
             logger.debug("Battery level at {}",progress);
@@ -264,14 +294,19 @@ public class LocalReaderCellController {
             rewind();
         });
         
-        // enter an error state if the battery is below 25 or 
-        // we have not heard from the unit in 15 seconds
+        
+        removeButton.visibleProperty().bind(reader.isEnabled().not());
+
+        // enter an error state if the battery is below 20 or 
+        // we have not heard from the unit in 10 seconds
+        // unless the unit is disabled, then we don't care
         errorState.bind(
+            reader.isEnabled().and(
             reader.getLastUpdatedProperty().greaterThan(10)
             .or(
                 reader.getBatteryProperty().greaterThanOrEqualTo(0.0)
                 .and(reader.getBatteryProperty().lessThanOrEqualTo(0.20))
-            )
+            ))
         );
         
     }

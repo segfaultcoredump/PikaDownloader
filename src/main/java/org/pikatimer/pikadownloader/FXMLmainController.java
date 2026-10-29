@@ -116,7 +116,7 @@ public class FXMLmainController {
     @FXML    HBox customFormatHBox;
 
     static final ObservableList<Reader> readerList = FXCollections.observableArrayList();
-    static final Map<String, Reader> readerMap = new HashMap();
+    static final Map<String, Reader> remoteReaderMap = new HashMap();
     static final BooleanProperty connected = new SimpleBooleanProperty(false);
 
     private static final String errorCSS = ".invalid-field {"
@@ -131,6 +131,8 @@ public class FXMLmainController {
     public void initialize() {
         // Set the default values from previous runs
         String endpoint = pikaPrefs.getPreferences().get("Endpoint", "");
+        
+        pikaPrefs.setReaderList(readerList);
 
         addLocalButton.setOnAction(event -> {
             addLocalDialog();
@@ -141,9 +143,9 @@ public class FXMLmainController {
         statusLabel.setText("Disconnected");
         connectButton.setOnAction(event -> {
             if (!connected.getValue()) {
-                connect();
+                connectRemote();
             } else {
-                disconnect();
+                // disconnect(); // Disconnect remote readers
             }
         });
         outputDirButton.setOnAction(event -> {
@@ -238,11 +240,22 @@ public class FXMLmainController {
         ObservableList<DiscoveredLocalReader> readers = FXCollections.observableArrayList();
         BooleanProperty scanCompleted = new SimpleBooleanProperty(false);
         BooleanProperty dialogClosed = new SimpleBooleanProperty(false);
+        Map<String,LocalReader> readerMap = new HashMap();
+        
+        
         // start a discovery task in a background thread
         Task pikaSearch = new Task<Void>() {
             @Override
             public Void call() {
-
+                
+                logger.debug("Excluding existing readers...");
+                readerList.forEach(x -> {
+                    if (x instanceof LocalReader r){
+                        readerMap.put(r.getReaderIPProperty().get(), r);
+                        logger.debug("Adding existing reader IP to exclude list: {}",r.getReaderIPProperty().get());
+                    }
+                });
+                
                 // This is ugly but it works
                 byte one = Integer.valueOf(1).byteValue();
                 byte zero = Integer.valueOf(0).byteValue();
@@ -434,17 +447,17 @@ public class FXMLmainController {
                 Platform.runLater(() -> {
                     readerList.add(r);
                 });
-                readerMap.put(ip, r);
+                remoteReaderMap.put(ip, r);
                 logger.debug("New Reader: {} -> {}", name, ip);
             });
         }
     }
 
-    private void connect() {
+    private void connectRemote() {
 
         File outputDir = PikaDownloaderPrefs.INSTANCE.getOutputDir();
         if (outputDir == null || !outputDir.canWrite()) {
-            disconnect();
+            // disconnect(); // Disconnect remote readers
             Alert alert = new Alert(AlertType.ERROR);
             alert.setTitle("Output Directory Not Set");
             alert.setHeaderText("The output directory is not set!");
@@ -460,7 +473,7 @@ public class FXMLmainController {
         statusLabel.setText("Connecting to " + relayURLTextField.getText());
         String endpoint = relayURLTextField.getText();
 
-        // Try and connect to the endpoint and get the status of the readers
+        // Try and connectRemote to the endpoint and get the status of the readers
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(endpoint + "status/"))
                 .setHeader("User-Agent", "Echo Transmitter") // add request header
@@ -476,7 +489,7 @@ public class FXMLmainController {
 
             // If the response status code is not 200, disconnect and toss a warning
             if (response.statusCode() != 200) {
-                disconnect();
+                // disconnect(); // Disconnect remote readers
                 Alert alert = new Alert(AlertType.WARNING);
                 alert.setTitle("Connection Error");
                 alert.setHeaderText("Unable to connect to relay service.");
@@ -493,7 +506,7 @@ public class FXMLmainController {
                 JSONObject p = results.getJSONObject(j);
 
                 if (p.has("mac") && REGEX_PATTERN.matcher(p.getString("mac")).matches()) {
-                    if (readerMap.containsKey(p.getString("mac"))) {
+                    if (remoteReaderMap.containsKey(p.getString("mac"))) {
                         //readerMap.get(p.getString("mac")).setStatus(p);
                     } else {
                         RemoteReader r = new RemoteReader(p.getString("mac"));
@@ -501,7 +514,7 @@ public class FXMLmainController {
                         Platform.runLater(() -> {
                             readerList.add(r);
                         });
-                        readerMap.put(p.getString("mac"), r);
+                        remoteReaderMap.put(p.getString("mac"), r);
                         logger.debug("New Reader: " + p.getString("mac"));
                     }
                 }
@@ -524,21 +537,11 @@ public class FXMLmainController {
             alert.setContentText(ex.getMessage());
 
             alert.showAndWait();
-            disconnect();
+            // disconnect(); // Disconnect remote readers
         }
     }
 
-    private void disconnect() {
-        statusLabel.setText("Disconnected");
-        relayURLTextField.setEditable(true);
 
-        readerList.removeAll(readerMap.values());
-
-        readerMap.clear();
-        connectButton.setText("Connect");
-        connected.set(false);
-        //PikaReceiverPrefs.getInstance().setEchoEndpoint(null);
-    }
 
     private void startStatusThread() {
 
@@ -551,7 +554,7 @@ public class FXMLmainController {
 
                 while (connected.getValue()) {
 
-                    // Try and connect to the endpoint and get the status of the readers
+                    // Try and connectRemote to the endpoint and get the status of the readers
                     HttpRequest request = HttpRequest.newBuilder()
                             .uri(URI.create(endpoint + "status/"))
                             .setHeader("User-Agent", "Echo Transmitter") // add request header
@@ -572,7 +575,7 @@ public class FXMLmainController {
                                 JSONObject p = results.getJSONObject(j);
 
                                 if (p.has("mac") && REGEX_PATTERN.matcher(p.getString("mac")).matches()) {
-                                    if (readerMap.containsKey(p.getString("mac"))) {
+                                    if (remoteReaderMap.containsKey(p.getString("mac"))) {
                                         //readerMap.get(p.getString("mac")).setStatus(p);;
                                     } else {
                                         RemoteReader r = new RemoteReader(p.getString("mac"));
@@ -580,7 +583,7 @@ public class FXMLmainController {
                                         Platform.runLater(() -> {
                                             readerList.add(r);
                                         });
-                                        readerMap.put(p.getString("mac"), r);
+                                        remoteReaderMap.put(p.getString("mac"), r);
                                         logger.debug("New Reader: " + p.getString("mac"));
                                     }
                                 }
@@ -617,7 +620,7 @@ public class FXMLmainController {
                 while (connected.getValue()) {
                     logger.trace("FXMLmainController::startPollingThread since: " + since);
 
-                    // Try and connect to the endpoint and get the data since the last read
+                    // Try and connectRemote to the endpoint and get the data since the last read
                     try {
                         logger.trace("FXMLmainController::startPollingThread request: " + endpoint + "data/since/" + since);
 
@@ -639,7 +642,7 @@ public class FXMLmainController {
                             for (int j = 0; j < results.length(); j++) {
                                 JSONObject p = results.getJSONObject(j);
 
-                                if (readerMap.containsKey(p.getString("mac"))) {
+                                if (remoteReaderMap.containsKey(p.getString("mac"))) {
                                     //readerMap.get(p.getString("mac")).processTime(p);;
                                 }
                                 since = p.getString("posttime");

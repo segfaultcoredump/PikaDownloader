@@ -1,3 +1,21 @@
+
+/*
+ * Copyright (C) 2026 John Garner <segfaultcoredump@gmail.com>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 package org.pikatimer.pikadownloader;
 
 import java.net.URL;
@@ -16,26 +34,23 @@ import org.slf4j.LoggerFactory;
 
 
 
-/**
- * JavaFX Downloader
- */
 public class Downloader extends Application {
     private static Stage mainStage;
-    static final Logger logger = LoggerFactory.getLogger(Downloader.class);
+    private static final Logger logger = LoggerFactory.getLogger(Downloader.class);
+    
+    private static final PikaDownloaderPrefs prefs = PikaDownloaderPrefs.INSTANCE;
 
 
     @Override
     public void start(Stage primaryStage) throws Exception{
 
-
+        prefs.setApplication(this);
+        
         mainStage=primaryStage;
-        primaryStage.setTitle("Pika Downloader v1.0 Beta 3");
+        primaryStage.setTitle("Pika Downloader v1.0");
         
         Parent myPane = FXMLLoader.load(getClass().getResource("FXMLmain.fxml"));
         Scene myScene = new Scene(myPane);
-        
-        
-  
         
  
         // Icons
@@ -83,10 +98,7 @@ public class Downloader extends Application {
             //primaryStage.setX((primaryScreenBounds.getWidth() - primaryStage.getWidth())/2);  
             //primaryStage.setY((primaryScreenBounds.getHeight() - primaryStage.getHeight())/2);
         
-        });
-        
-        
-        
+        });        
         
         primaryStage.show();
         

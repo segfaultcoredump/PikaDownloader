@@ -111,8 +111,12 @@ public class LocalReader implements Reader {
     
     private Read lastRead = null;
     
+    private BooleanProperty enabledProperty = new SimpleBooleanProperty(true);
+    
     Thread pikaConnectionThread;
     private EventWebSocketClient webSocketClient;
+    
+    Timeline timeline;
     
     public LocalReader(String reader_ip, String port, String reader_id){
         readerIPProperty.setValue(reader_ip); 
@@ -132,24 +136,7 @@ public class LocalReader implements Reader {
             prefs.put("LOCAL-READER-OUTPUT-" + readerNameProperty.getValue(), newValue);
         });
         
-        // lets periodically update stuff
-        Timeline timeline = new Timeline(
-            new KeyFrame(javafx.util.Duration.seconds(1), event -> {
-                // This entire block runs safely on the JavaFX Application Thread
-                if (lastRead != null) {
-                    lastReadProperty.setValue(lastRead.chip() + " ->\n" + lastRead.dateTime());
-                    readCountProperty.set(processedReads.size());
-                }
-                
-                // update the last updated counter
-                if (lastUpdated != null) {
-                    lastUpdatedProperty.setValue(Duration.between(lastUpdated, LocalDateTime.now()).toSeconds());
-                    logger.trace("Reader::setStatus: lastUpdated " + lastUpdatedProperty.getValue().toString() + " ago");
-                }            
-            })
-        );
-        timeline.setCycleCount(Animation.INDEFINITE);
-        timeline.play();
+        
     
         
     }
@@ -179,6 +166,24 @@ public class LocalReader implements Reader {
             return; // already connected
         }
         
+        // lets periodically update stuff
+        timeline = new Timeline(
+            new KeyFrame(javafx.util.Duration.seconds(1), event -> {
+                // This entire block runs safely on the JavaFX Application Thread
+                if (lastRead != null) {
+                    lastReadProperty.setValue(lastRead.chip() + " ->\n" + lastRead.dateTime());
+                    readCountProperty.set(processedReads.size());
+                }
+                
+                // update the last updated counter
+                if (lastUpdated != null) {
+                    lastUpdatedProperty.setValue(Duration.between(lastUpdated, LocalDateTime.now()).toSeconds());
+                    logger.trace("Reader::setStatus: lastUpdated " + lastUpdatedProperty.getValue().toString() + " ago");
+                }            
+            })
+        );
+        timeline.setCycleCount(Animation.INDEFINITE);
+        timeline.play();
 
         LocalReader reader = this;
         Task pikaReaderConnection = new Task<Void>() {
@@ -316,6 +321,27 @@ public class LocalReader implements Reader {
         return readerIPProperty;
     }
     
+    public StringProperty getReaderPortProperty(){
+        return readerPortProperty;
+    }
+    
+    public void disable(){
+        enabledProperty.set(false);
+        webSocketClient.close();
+        if (timeline != null) timeline.stop();
+        lastUpdatedProperty.set(99);
+        connectedProperty.set(false);
+    }
+    
+    public void enable(){
+        connect();
+        enabledProperty.set(true);
+    }
+    
+    public BooleanProperty isEnabled(){
+        return enabledProperty;
+    }
+
     @Override
     public StringProperty getOutputFileProperty(){
         return outputFileProperty;
@@ -539,18 +565,25 @@ public class LocalReader implements Reader {
         public void onClose(int code, String reason, boolean remote) {
             logger.error("Reader {} closed with exit code {}: {}",reader.getReaderNameProperty().getValue(), code, reason);
             
-            // OFF-THREAD RECONNECT:
-            // Schedule a reconnection task in the background after 5 seconds
-            scheduler.schedule(() -> {
-                System.out.println("Attempting to reconnect...");
-                try {
-                    // reconnectBlocking() is safe here because it runs on the executor thread
-                    this.reconnectBlocking(); 
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    System.err.println("Reconnection was interrupted.");
-                }
-            }, 5, TimeUnit.SECONDS); 
+            if (enabledProperty.get()) {
+                // OFF-THREAD RECONNECT:
+                // Schedule a reconnection task in the background after 5 seconds
+                scheduler.schedule(() -> {
+                    System.out.println("Attempting to reconnect...");
+                    if (timeline != null) timeline.stop();
+                    lastUpdatedProperty.set(99);
+                    connectedProperty.set(false);
+                    reader.connect();
+//                    try {
+//                        // reconnectBlocking() is safe here because it runs on the executor thread
+//                        this.reconnectBlocking(); 
+//                        connectedProperty.set(true);
+//                    } catch (InterruptedException e) {
+//                        Thread.currentThread().interrupt();
+//                        System.err.println("Reconnection was interrupted.");
+//                    }
+                }, 5, TimeUnit.SECONDS); 
+            }
         }
 
         @Override

@@ -7,6 +7,8 @@ package org.pikatimer.pikadownloader;
 
 import java.io.File;
 import java.util.prefs.Preferences;
+import javafx.application.Application;
+import javafx.collections.ObservableList;
 
 /**
  *
@@ -18,6 +20,8 @@ public enum PikaDownloaderPrefs {
     private static final Preferences prefs = Preferences.userRoot().node("PikaDownloader");
     private File outputDir = null;
     private String echoEndpoint = "";
+    private Application application;
+    ObservableList<Reader> readerList;
            
     public Preferences getPreferences(){
         return prefs;
@@ -39,6 +43,20 @@ public enum PikaDownloaderPrefs {
         echoEndpoint = e;
     }
     
+    public void setApplication(Application app){
+        application = app;
+    }
+    public Application getApplication(){
+        return application;
+    }
     
+    public void setReaderList(ObservableList<Reader> readers) {
+        readerList = readers;
+    }
+    
+    public ObservableList<Reader> getReaderList(){
+        return readerList;
+    }
+            
     
 }

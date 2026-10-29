@@ -13,7 +13,7 @@
 <?import javafx.scene.text.Font?>
 <?import org.controlsfx.control.ToggleSwitch?>
 
-<VBox fx:id="rootVBox" stylesheets="@PikaReciever.css" xmlns="http://javafx.com/javafx/23" xmlns:fx="http://javafx.com/fxml/1" fx:controller="org.pikatimer.pikadownloader.LocalReaderCellController">
+<VBox fx:id="rootVBox" stylesheets="@PikaDownloader.css" xmlns="http://javafx.com/javafx/23" xmlns:fx="http://javafx.com/fxml/1" fx:controller="org.pikatimer.pikadownloader.LocalReaderCellController">
    <children>
       <TitledPane fx:id="titledPane">
          <content>
@@ -114,6 +114,17 @@
                         <Insets bottom="2.0" left="2.0" right="2.0" top="2.0" />
                      </padding>
                   </HBox>
+                  <TitledPane expanded="false" text="Advanced">
+                     <content>
+                        <HBox>
+                           <children>
+                              <Button fx:id="disconnectButton" mnemonicParsing="false" text="Disconnect" />
+                              <Pane maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
+                              <Button fx:id="removeButton" mnemonicParsing="false" text="Remove" />
+                           </children>
+                        </HBox>
+                     </content>
+                  </TitledPane>
                </children>
                <padding>
                   <Insets bottom="5.0" left="5.0" right="5.0" top="5.0" />
