@@ -16,21 +16,31 @@
  */
 package org.pikatimer.pikadownloader;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletionException;
 import java.util.prefs.Preferences;
 import javafx.application.HostServices;
+import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
+import javafx.collections.FXCollections;
+import javafx.collections.ListChangeListener;
+import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
 import javafx.geometry.Pos;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.ChoiceBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TitledPane;
+import javafx.scene.control.Tooltip;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
@@ -39,6 +49,8 @@ import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import org.controlsfx.control.ToggleSwitch;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -96,6 +108,16 @@ public class LocalReaderCellController {
     @FXML Label readStatusLabel;
     @FXML Circle readStatusCircle;
     
+    @FXML HBox profileHBox;
+    @FXML ChoiceBox<ReaderProfile> profileChoiceBox;
+
+    // The ChoiceBox gets its own copy of the reader's profile list so that
+    // every programmatic update happens under the syncingProfile guard and
+    // never looks like the user picking a new profile
+    private final ObservableList<ReaderProfile> profileChoices = FXCollections.observableArrayList();
+    private final BooleanProperty profileChangeInProgress = new SimpleBooleanProperty(false);
+    private boolean syncingProfile = false;
+
     @FXML ToggleSwitch outputFileToggleSwitch;
     @FXML TextField outputFileTextField;
     @FXML Button rewindButton;
@@ -268,7 +290,45 @@ public class LocalReaderCellController {
             }
         });
         
-        // Not quite as clean as simply binding the values, but it helps 
+        // Reader Profile
+        // Hidden if the reader is running an older PikaReader without profiles
+        profileHBox.visibleProperty().bind(reader.getProfileSupportedProperty());
+        profileHBox.managedProperty().bind(reader.getProfileSupportedProperty());
+
+        profileChoiceBox.setItems(profileChoices);
+
+        // Visible but not changeable while reading
+        profileChoiceBox.disableProperty().bind(
+            reader.getReadingProperty()
+            .or(profileChangeInProgress)
+            .or(reader.isEnabled().not())
+            .or(Bindings.isEmpty(profileChoices))
+        );
+
+        // Tooltips are not shown on disabled controls, so put it on the HBox
+        Tooltip profileTooltip = new Tooltip();
+        profileTooltip.textProperty().bind(
+            Bindings.when(reader.getReadingProperty())
+                .then("Stop the reader to change the profile")
+                .otherwise("Select a reader profile")
+        );
+        Tooltip.install(profileHBox, profileTooltip);
+
+        // Keep the display in sync with the reader, including changes made
+        // directly on the unit (via the STATUS messages)
+        syncProfileList();
+        reader.getProfiles().addListener((ListChangeListener.Change<? extends ReaderProfile> c) -> syncProfileList());
+        reader.getProfileIDProperty().addListener((ov, o, n) -> syncProfileSelection());
+
+        // The user picked a profile
+        profileChoiceBox.valueProperty().addListener((ov, o, n) -> {
+            if (syncingProfile || n == null) return;
+            if (n.id().equals(reader.getProfileIDProperty().getValueSafe())) return;
+            // Let the ChoiceBox popup close before we prompt
+            Platform.runLater(() -> promptProfileChange(n));
+        });
+
+        // Not quite as clean as simply binding the values, but it helps
         outputFileToggleSwitch.setSelected(reader.getOutputToFileProperty().getValue());
         outputFileToggleSwitch.selectedProperty().addListener(a -> {
             reader.getOutputToFileProperty().set(outputFileToggleSwitch.isSelected());
@@ -335,6 +395,104 @@ public class LocalReaderCellController {
 
     private void rewind(){
          reader.rewind();
+    }
+
+    // Copy the reader's profile list into the ChoiceBox and select the current one
+    private void syncProfileList() {
+        syncingProfile = true;
+        try {
+            profileChoices.setAll(reader.getProfiles());
+        } finally {
+            syncingProfile = false;
+        }
+        syncProfileSelection();
+    }
+
+    // Select the profile the reader is currently using
+    private void syncProfileSelection() {
+        syncingProfile = true;
+        try {
+            String currentID = reader.getProfileIDProperty().getValueSafe();
+            ReaderProfile current = profileChoices.stream()
+                    .filter(p -> p.id().equals(currentID))
+                    .findFirst()
+                    .orElse(null);
+            profileChoiceBox.setValue(current);
+        } finally {
+            syncingProfile = false;
+        }
+    }
+
+    private void promptProfileChange(ReaderProfile target) {
+        String currentName = reader.getProfileNameProperty().getValueSafe();
+
+        Alert alert = new Alert(AlertType.CONFIRMATION);
+        alert.setTitle("Change Reader Profile");
+        alert.setHeaderText("Change Reader Profile");
+        String content = "Change the reader profile for " + reader.getReaderNameProperty().getValueSafe()
+                + "\nfrom " + currentName + " to " + target.name() + "?";
+        if (target.description() != null && !target.description().isBlank()) {
+            content += "\n\n" + target.name() + ": " + target.description();
+        }
+        alert.setContentText(content);
+
+        Optional<ButtonType> result = alert.showAndWait();
+        if (result.isEmpty() || result.get() != ButtonType.OK) {
+            syncProfileSelection(); // revert the ChoiceBox
+            return;
+        }
+
+        profileChangeInProgress.set(true);
+        reader.changeProfile(target.id()).whenComplete((response, ex) -> {
+            Platform.runLater(() -> {
+                profileChangeInProgress.set(false);
+                syncProfileSelection();
+
+                if (ex != null) {
+                    Throwable cause = (ex instanceof CompletionException && ex.getCause() != null) ? ex.getCause() : ex;
+                    String msg = cause.getMessage() != null ? cause.getMessage() : cause.toString();
+                    logger.warn("Unable to change the profile for {} to {}: {}", reader.getReaderNameProperty().getValueSafe(), target.id(), msg);
+
+                    Alert error = new Alert(AlertType.ERROR);
+                    error.setTitle("Change Reader Profile");
+                    error.setHeaderText("Unable to change the reader profile");
+                    error.setContentText(msg);
+                    error.showAndWait();
+                    return;
+                }
+
+                // Show any warnings (e.g. a reader model not suited to this profile)
+                List<String> warnings = profileWarnings(response);
+                if (!warnings.isEmpty()) {
+                    Alert warning = new Alert(AlertType.WARNING);
+                    warning.setTitle("Change Reader Profile");
+                    warning.setHeaderText("Profile changed to " + reader.getProfileNameProperty().getValueSafe());
+                    warning.setContentText(String.join("\n", warnings));
+                    warning.showAndWait();
+                }
+            });
+        });
+    }
+
+    // {"readers":[{"id":1,"settings":{"warnings":["..."]}},...]}
+    private List<String> profileWarnings(JSONObject response) {
+        List<String> warnings = new ArrayList<>();
+        if (response == null) return warnings;
+        JSONArray readers = response.optJSONArray("readers");
+        if (readers == null) return warnings;
+        for (int i = 0; i < readers.length(); i++) {
+            JSONObject r = readers.optJSONObject(i);
+            if (r == null) continue;
+            JSONObject settings = r.optJSONObject("settings");
+            if (settings == null) continue;
+            JSONArray w = settings.optJSONArray("warnings");
+            if (w == null) continue;
+            for (int j = 0; j < w.length(); j++) {
+                String s = w.optString(j, "");
+                if (!s.isBlank()) warnings.add(s);
+            }
+        }
+        return warnings;
     }
     
 }

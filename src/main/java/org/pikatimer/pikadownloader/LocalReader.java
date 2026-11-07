@@ -23,23 +23,29 @@ import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.prefs.Preferences;
 import javafx.animation.Animation;
 import javafx.animation.KeyFrame;
@@ -54,6 +60,8 @@ import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
 import javafx.concurrent.Task;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
@@ -112,7 +120,19 @@ public class LocalReader implements Reader {
     private Read lastRead = null;
     
     private BooleanProperty enabledProperty = new SimpleBooleanProperty(true);
-    
+
+    // Reader profiles (PikaReader 6684b90 and newer).
+    // Older PikaReader versions do not send a profile in their STATUS messages,
+    // so profileSupportedProperty stays false and the UI hides the profile.
+    private final BooleanProperty profileSupportedProperty = new SimpleBooleanProperty(false);
+    private final StringProperty profileIDProperty = new SimpleStringProperty("");
+    private final StringProperty profileNameProperty = new SimpleStringProperty("");
+    private final ObservableList<ReaderProfile> profiles = FXCollections.observableArrayList();
+    private final AtomicBoolean profilesLoading = new AtomicBoolean(false);
+    private volatile boolean profilesLoaded = false;
+
+    private static final HttpClient httpClient = HttpClient.newHttpClient();
+
     Thread pikaConnectionThread;
     private EventWebSocketClient webSocketClient;
     
@@ -247,7 +267,28 @@ public class LocalReader implements Reader {
             logger.trace("Battery Level: {} set to {}",readerNameProperty.getValue(),batteryProperty.getValue());
 
             // Reading
-            readingProperty.setValue(status.getBoolean("reading"));            
+            readingProperty.setValue(status.getBoolean("reading"));
+
+            // Reader Profile
+            // {"profile":{"id":"finish_mats","name":"Finish Mats"}}
+            JSONObject profile = status.optJSONObject("profile");
+            if (profile != null) {
+                String id = profile.optString("id");
+                String name = profile.optString("name", id);
+                profileSupportedProperty.setValue(true);
+                profileIDProperty.setValue(id);
+                profileNameProperty.setValue(name);
+
+                // If we don't know about this profile yet (first status or
+                // the profile list changed on the unit), add a placeholder
+                // so it can be displayed and then go fetch the full list.
+                // Keep trying to fetch the list until it loads.
+                boolean unknownProfile = !id.isBlank() && profiles.stream().noneMatch(p -> p.id().equals(id));
+                if (unknownProfile) profiles.add(new ReaderProfile(id, name, ""));
+                if (unknownProfile || !profilesLoaded) loadProfiles();
+            } else {
+                profileSupportedProperty.setValue(false);
+            }
         });
         
         // Last Updated TS
@@ -380,6 +421,101 @@ public class LocalReader implements Reader {
                 
         // sendAsync executes non-blocking and returns a CompletableFuture
         client.sendAsync(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    public BooleanProperty getProfileSupportedProperty(){
+        return profileSupportedProperty;
+    }
+
+    public StringProperty getProfileIDProperty(){
+        return profileIDProperty;
+    }
+
+    public StringProperty getProfileNameProperty(){
+        return profileNameProperty;
+    }
+
+    public ObservableList<ReaderProfile> getProfiles(){
+        return profiles;
+    }
+
+    // Fetch the list of available profiles from the reader
+    // {"current":"finish_mats","profiles":[{"id":"finish_mats","name":"Finish Mats","description":"...","tagPopulation":32},...]}
+    public void loadProfiles(){
+        // The STATUS messages arrive once a second, so don't stack up requests
+        if (!profilesLoading.compareAndSet(false, true)) return;
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://" + readerIPProperty.getValueSafe() + ":" + readerPortProperty.getValueSafe() + "/profiles" ))
+                .timeout(Duration.ofSeconds(10))
+                .GET()
+                .build();
+
+        httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+            .thenAccept(response -> {
+                if (response.statusCode() < 200 || response.statusCode() > 299) {
+                    logger.debug("Unable to load the profiles for {}: HTTP {}", readerNameProperty.getValueSafe(), response.statusCode());
+                    return;
+                }
+                JSONArray list = new JSONObject(response.body()).getJSONArray("profiles");
+                List<ReaderProfile> newProfiles = new ArrayList<>();
+                for (int i = 0; i < list.length(); i++) {
+                    JSONObject p = list.getJSONObject(i);
+                    String id = p.getString("id");
+                    newProfiles.add(new ReaderProfile(id, p.optString("name", id), p.optString("description", "")));
+                }
+                logger.debug("Loaded {} profiles for {}", newProfiles.size(), readerNameProperty.getValueSafe());
+                Platform.runLater(() -> {
+                    // Keep the current profile in the list even if the unit didn't return it
+                    String currentID = profileIDProperty.getValueSafe();
+                    if (!currentID.isBlank() && newProfiles.stream().noneMatch(p -> p.id().equals(currentID))) {
+                        newProfiles.add(new ReaderProfile(currentID, profileNameProperty.getValueSafe(), ""));
+                    }
+                    profiles.setAll(newProfiles);
+                });
+                profilesLoaded = true;
+            })
+            .exceptionally(ex -> {
+                logger.debug("Unable to load the profiles for {}: {}", readerNameProperty.getValueSafe(), ex.getMessage());
+                return null;
+            })
+            .whenComplete((v, ex) -> profilesLoading.set(false));
+    }
+
+    // Change the reader profile. Only allowed by the reader when it is not reading.
+    // Completes with the reader's response on success, or exceptionally with
+    // the reader's error message (e.g. 409 if the reader is reading).
+    public CompletableFuture<JSONObject> changeProfile(String id){
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://" + readerIPProperty.getValueSafe() + ":" + readerPortProperty.getValueSafe() + "/profile/"
+                        + URLEncoder.encode(id, StandardCharsets.UTF_8).replace("+", "%20")))
+                .timeout(Duration.ofSeconds(45)) // The reader can take up to 30 seconds to apply the profile
+                .PUT(HttpRequest.BodyPublishers.noBody())
+                .build();
+
+        logger.debug("Changing the profile for {} to {}", readerNameProperty.getValueSafe(), id);
+        return httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+            .thenApply(response -> {
+                JSONObject body;
+                try {
+                    body = new JSONObject(response.body());
+                } catch (Exception ex) {
+                    body = new JSONObject();
+                }
+
+                if (response.statusCode() < 200 || response.statusCode() > 299) {
+                    throw new RuntimeException(body.optString("error", "HTTP " + response.statusCode()));
+                }
+
+                String newID = body.optString("id", id);
+                String newName = body.optString("name", newID);
+                logger.debug("Profile for {} changed to {}", readerNameProperty.getValueSafe(), newName);
+                Platform.runLater(() -> {
+                    profileIDProperty.setValue(newID);
+                    profileNameProperty.setValue(newName);
+                });
+                return body;
+            });
     }
     
     public void rewind() {
