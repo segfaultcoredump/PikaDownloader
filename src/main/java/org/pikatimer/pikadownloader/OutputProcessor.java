@@ -215,7 +215,7 @@ public enum OutputProcessor {
             case RFIDServer -> r.antenna().toString() + "," + r.chip() + "," + bibChipMap.getOrDefault(r.chip(), r.chip()) + ",\"" + time + "\""  ;
             case ChipTime -> r.chip() + "," + time;
             case BibTime -> bibChipMap.getOrDefault(r.chip(), r.chip()) + "," + time;
-            case ChipDateTime -> r.chip() + "," + time;
+            case ChipDateTime -> r.chip() + "," + date + "," + time;
             case BibDateTime -> bibChipMap.getOrDefault(r.chip(), r.chip()) + "," +  date + "," + time;
             case CUSTOM -> processCustomOutputString(r); 
         };
