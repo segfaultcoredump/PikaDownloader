@@ -34,13 +34,23 @@ All code lives in `org.pikatimer.pikadownloader` (a JPMS module, see `module-inf
   - It connects to `ws://ip:port/events` (Java-WebSocket). Messages are JSON with `type` `READ` or `STATUS`.
   - It controls the unit with HTTP `GET /start`, `/stop`, and `/rewind/<from>/<to>` (ISO local date-times; returns a JSON array of reads).
   - Reader profiles: each `STATUS` carries `profile: {id, name}`. `GET /profiles` lists the available ones, and `PUT /profile/{id}` changes the profile; it returns 409 while reading and can block for up to 30s. When `profile` is missing, the unit runs an older PikaReader, so `profileSupportedProperty` stays false and the cell hides the profile row. `LocalReaderCellController` keeps its own copy of the profile list and applies programmatic updates under a `syncingProfile` guard, so only real user picks trigger the confirmation prompt.
-  - Reads become `Read` records, are de-duplicated per reader, and are pushed onto `OutputProcessor`'s `BlockingQueue`. A 1s `Timeline` refreshes UI properties.
-  - Per-reader output filename is persisted under pref key `LOCAL-READER-OUTPUT-<unitID>`.
-- **`OutputProcessor`** runs one daemon thread. It takes from the queue, waits 500ms to batch, groups reads by reader and writes each group on a virtual thread. It keeps one appending `BufferedWriter` per output filename and writes a header row when the file is empty. Built-in formats come from the `OutputFormat` enum. `CUSTOM` uses `TOKEN_PATTERN`; header and row rendering are separate methods that must be kept in sync when adding tokens.
+  - Reads become `Read` records, are de-duplicated per reader, and are pushed onto `OutputProcessor`'s `BlockingQueue` with `put()` (it blocks when full, so large rewinds don't throw). `processedReads` deliberately keeps every read for the session (planned read review/search feature). A 1s `Timeline` refreshes UI properties.
+  - After a websocket closes, a reconnect is scheduled every 5s on one shared static `RECONNECT` scheduler. The reconnect itself runs on the FX thread and is skipped if the reader was disabled in the meantime.
+  - Per-reader output filename is persisted under pref key `LOCAL-READER-OUTPUT-<unitID>`, where the key is captured from the discovery unit ID in the constructor.
+  - Start, stop, rewind and profile requests use the shared async `HttpClient` with timeouts. Failures surface to the user as Alerts (`LocalReader.errorMessage` unwraps future exceptions).
+- **`OutputProcessor`** runs one daemon thread.
+  - It polls the queue, waits 500ms to batch, then **groups reads by output file** (not by reader). Each file is written by a single virtual-thread task, so readers sharing a file never interleave lines.
+  - It keeps one appending `BufferedWriter` per absolute `Path` and writes a header row when the file is empty. A file name that would resolve outside the output dir is rejected.
+  - Batches and writes happen under `outputLock`. `requestCloseAll()` closes every writer before the next batch; call it when the output dir, a file name or an output toggle changes. `shutdown()` (from `Downloader.stop()`) drains, writes and closes everything.
+  - If the output dir is missing, it logs an error and shows one warning Alert until a dir is set.
+  - Note the enum init order: `INSTANCE` is constructed before the static fields, so state the constructor needs must be instance fields.
+  - Built-in formats come from the `OutputFormat` enum. `CUSTOM` is compiled once into a `CustomFormat`, where each token defines both its header name and its renderer, so header and rows stay in sync.
+  - Malformed reads are logged and skipped per read.
 - **`RemoteReader`** is the legacy/unfinished relay path. It polls an HTTP relay (`status/`, `data/since/`) and writes files itself instead of going through `OutputProcessor`. The relay UI accordion in `FXMLmain.fxml` is hidden (`visible="false"`), and the per-read dispatch in the polling thread is commented out.
-- **Bib→chip map:** `FXMLSetupBibMapController` imports a CSV/TXT into `OutputProcessor.getBibChipMap()`. Bib-based formats fall back to the chip number when a chip has no mapping.
+- **Bib→chip map:** `FXMLSetupBibMapController` parses CSV/TXT files with `util/BibChipFileParser`, a pure function that handles headers, quotes, a BOM and short lines. It saves through `OutputProcessor.setBibChipMap()`, which updates the same `ConcurrentHashMap` in place and is never empty part way through. Bib-based formats fall back to the chip number when a chip has no mapping.
 
 ## Conventions
 - Network and file I/O run on background `Task`/daemon threads. Every JavaFX property or UI mutation from those threads goes through `Platform.runLater`.
-- Logging is SLF4J + Logback (`src/main/resources/logback.xml`). The root level is TRACE, written to the console and to a rolling file `${java.io.tmpdir}/PikaReciever-*.log`.
+- Logging is SLF4J + Logback (`src/main/resources/logback.xml`). Root is at INFO and `org.pikatimer` at DEBUG, written to the console and to a rolling file `${java.io.tmpdir}/PikaDownloader-*.log`. Per-message and per-read logging is at TRACE, so keep hot-path logs at `trace` and use `{}` parameters.
+- File and directory choosers must use `PikaDownloaderPrefs.directoryOrHome(...)` for the initial directory, because Windows throws when it doesn't exist.
 - Planned work is tracked in the root `TODO` file.

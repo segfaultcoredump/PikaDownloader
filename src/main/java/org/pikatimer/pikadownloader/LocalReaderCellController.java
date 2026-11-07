@@ -19,10 +19,12 @@ package org.pikatimer.pikadownloader;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletableFuture;
+import java.util.regex.Pattern;
 import java.util.prefs.Preferences;
 import javafx.application.HostServices;
 import javafx.application.Platform;
+import javafx.beans.binding.BooleanBinding;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
@@ -62,6 +64,9 @@ public class LocalReaderCellController {
     static final Logger logger = LoggerFactory.getLogger(LocalReaderCellController.class);
 
     private static final Preferences prefs = PikaDownloaderPrefs.INSTANCE.getPreferences();
+
+    // Path separators and characters that are illegal in a file name on any platform
+    private static final Pattern INVALID_FILE_NAME_CHARS = Pattern.compile("[/\\\\:*?\"<>|\\p{Cntrl}]");
     
     private static final String errorCSS = """
         /* Custom error style for TitledPane */
@@ -227,7 +232,7 @@ public class LocalReaderCellController {
         // Battery Level
         batteryLevelProgressBar.progressProperty().addListener((observable, oldValue, newValue) -> {
             double progress = newValue.doubleValue();
-            logger.debug("Battery level at {}",progress);
+            logger.trace("Battery level at {}",progress);
             if (progress < 0) battHBox.setVisible(false);
             else battHBox.setVisible(true);
             
@@ -277,7 +282,7 @@ public class LocalReaderCellController {
         onlineStatusCircle.setFill(Color.web("#00A37A")); // Vibrant Mint Teal
 
         reader.getLastUpdatedProperty().addListener((ov, o, u) -> {
-            logger.debug("Reader updated Property listener fired " + o + " -> " + u);
+            logger.trace("Reader updated Property listener fired {} -> {}", o, u);
             if (u.intValue() < 2) {
                 onlineStatusCircle.setFill(Color.web("#00A37A")); // Vibrant Mint Teal
                 onlineStatusLabel.textProperty().setValue("Connected:");
@@ -342,10 +347,19 @@ public class LocalReaderCellController {
             logger.trace("Output File Update for {} -> {}", reader.getReaderNameProperty().getValueSafe(), newValue);
             if (!oldValue.equals(newValue)) {
                 outputFileToggleSwitch.setSelected(false);
-                reader.getOutputFileProperty().setValue(newValue); 
+                reader.getOutputFileProperty().setValue(newValue);
             }
         });
-        
+
+        // Flag bad file names (path separators, illegal characters) and
+        // don't allow the output to be turned on until it is fixed
+        BooleanBinding validFileName = Bindings.createBooleanBinding(
+                () -> isValidFileName(outputFileTextField.getText()),
+                outputFileTextField.textProperty());
+        outputFileToggleSwitch.disableProperty().bind(validFileName.not());
+        validFileName.addListener((ov, o, valid) -> updateOutputFileState(valid));
+        updateOutputFileState(validFileName.get());
+
         startReaderButton.setOnAction(event -> {
             toggleReading();
         });
@@ -371,8 +385,32 @@ public class LocalReaderCellController {
         
     }
 
+    // Valid: not blank, not . or .., and no path separators or characters
+    // that are illegal in a file name (on any platform)
+    static boolean isValidFileName(String name) {
+        if (name == null || name.isBlank()) return false;
+        if (name.equals(".") || name.equals("..")) return false;
+        return !INVALID_FILE_NAME_CHARS.matcher(name).find();
+    }
+
+    private void updateOutputFileState(boolean valid) {
+        String name = outputFileTextField.getText();
+        // Blank is not an error (just no output file yet), so only flag real problems
+        boolean flag = !valid && name != null && !name.isBlank();
+        if (flag) {
+            if (!outputFileTextField.getStyleClass().contains("invalid-field")) {
+                outputFileTextField.getStyleClass().add("invalid-field");
+            }
+        } else {
+            outputFileTextField.getStyleClass().remove("invalid-field");
+        }
+        if (!valid && outputFileToggleSwitch.isSelected()) {
+            outputFileToggleSwitch.setSelected(false);
+        }
+    }
+
     private void toggleReading() {
-        Boolean currentReadingStatus = reader.getReadingProperty().getValue();
+        boolean currentReadingStatus = reader.getReadingProperty().getValue();
         Alert alert = new Alert(AlertType.CONFIRMATION);
         
         if (currentReadingStatus == true) {
@@ -386,11 +424,24 @@ public class LocalReaderCellController {
         }
         
         Optional<ButtonType> result = alert.showAndWait();
-        if (result.get() == ButtonType.OK) {
-            // send the stop or start command...
-            if (currentReadingStatus) reader.stopReader();
-            else reader.startReader();
-        }
+        if (result.isEmpty() || result.get() != ButtonType.OK) return;
+
+        // send the stop or start command...
+        String action = currentReadingStatus ? "stop" : "start";
+        startReaderButton.setDisable(true);
+        CompletableFuture<?> request = currentReadingStatus ? reader.stopReader() : reader.startReader();
+        request.whenComplete((response, ex) -> Platform.runLater(() -> {
+            startReaderButton.setDisable(false);
+            if (ex != null) {
+                String msg = LocalReader.errorMessage(ex);
+                logger.warn("Unable to {} {}: {}", action, reader.getReaderNameProperty().getValueSafe(), msg);
+                Alert error = new Alert(AlertType.ERROR);
+                error.setTitle(currentReadingStatus ? "Stop Reader" : "Start Reader");
+                error.setHeaderText("Unable to " + action + " " + reader.getReaderNameProperty().getValueSafe());
+                error.setContentText(msg);
+                error.showAndWait();
+            }
+        }));
     }
 
     private void rewind(){
@@ -449,8 +500,7 @@ public class LocalReaderCellController {
                 syncProfileSelection();
 
                 if (ex != null) {
-                    Throwable cause = (ex instanceof CompletionException && ex.getCause() != null) ? ex.getCause() : ex;
-                    String msg = cause.getMessage() != null ? cause.getMessage() : cause.toString();
+                    String msg = LocalReader.errorMessage(ex);
                     logger.warn("Unable to change the profile for {} to {}: {}", reader.getReaderNameProperty().getValueSafe(), target.id(), msg);
 
                     Alert error = new Alert(AlertType.ERROR);

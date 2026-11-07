@@ -18,62 +18,83 @@ package org.pikatimer.pikadownloader;
 
 import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.prefs.Preferences;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import javafx.concurrent.Task;
+import javafx.application.Platform;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Alert.AlertType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
+ * Takes the reads from every reader (via the read queue) and writes them out
+ * to each reader's output file in the selected output format.
+ *
+ * Reads are batched (500ms), grouped by output file, and each file is written
+ * by a single task so that two readers sharing a file never interleave lines.
+ *
+ * NOTE: As an enum singleton, the INSTANCE is constructed before the static
+ * fields below are initialized, so anything the constructor needs must be an
+ * instance field.
  *
  * @author john
  */
-//todo: make this an enum singleton
 public enum OutputProcessor {
     INSTANCE;
 
     private static final Logger logger = LoggerFactory.getLogger(OutputProcessor.class);
 
     private static final Preferences prefs = PikaDownloaderPrefs.INSTANCE.getPreferences();
-    private static final BlockingQueue<Read> readQueue = new ArrayBlockingQueue(100000);
-    private static final Map<String, BufferedWriter> bufferedWriterMap = new ConcurrentHashMap();
 
-    private OutputFormat outputFormat = OutputFormat.valueOf(PikaDownloaderPrefs.INSTANCE.getPreferences().get("OutputFormat", OutputFormat.ChipTime.name()));
-    private String customFormat = PikaDownloaderPrefs.INSTANCE.getPreferences().get("CustomOutputFormat", "");
+    private final BlockingQueue<Read> readQueue = new ArrayBlockingQueue<>(100000);
 
-    private static final Map<String, String> bibChipMap = new HashMap();
+    // Open output files, keyed by their absolute path
+    private final Map<Path, BufferedWriter> bufferedWriterMap = new ConcurrentHashMap<>();
 
-    // Pattern matcher for the custom output format string
-    // Group 1: Matches the escape backslash character
-    // Group 2: Matches %TOKEN or $TOKEN styles
-    // Group 3: Matches ${TOKEN} or %{TOKEN} styles
-    // Group 4: Matches the optional :PARAM within ${TOKEN:PARAM}
-    private static final Pattern TOKEN_PATTERN = Pattern.compile(
-            "(\\\\)?(?:[\\%$]([A-Za-z]+)|[\\%$]\\{([A-Za-z]+)(?::([^}]+))?})",
-            Pattern.CASE_INSENSITIVE
-    );
+    // chip -> bib. Always the same instance (other classes hold on to it),
+    // updated in place via setBibChipMap()
+    private final Map<String, String> bibChipMap = new ConcurrentHashMap<>();
+
+    // Guards the pending batch and all file writes
+    private final ReentrantLock outputLock = new ReentrantLock();
+    private final List<Read> pending = new ArrayList<>(); // guarded by outputLock
+
+    private final AtomicBoolean closeRequested = new AtomicBoolean(false);
+    private final AtomicBoolean missingDirWarned = new AtomicBoolean(false);
+    private volatile boolean shutdown = false;
+
+    private volatile OutputFormat outputFormat = loadOutputFormat();
+    private volatile String customFormat = PikaDownloaderPrefs.INSTANCE.getPreferences().get("CustomOutputFormat", "");
+    private volatile CustomFormat compiledFormat;
 
     private OutputProcessor() {
+        compiledFormat = CustomFormat.compile(customFormat, bibChipMap);
         setupReadProcessor();
+    }
+
+    private static OutputFormat loadOutputFormat() {
+        try {
+            return OutputFormat.valueOf(PikaDownloaderPrefs.INSTANCE.getPreferences().get("OutputFormat", OutputFormat.ChipTime.name()));
+        } catch (IllegalArgumentException ex) {
+            return OutputFormat.ChipTime; // Unknown value in the prefs
+        }
     }
 
     public OutputFormat getOutputFormat() {
@@ -91,6 +112,7 @@ public enum OutputProcessor {
 
     public void setCustomFormat(String format) {
         customFormat = format;
+        compiledFormat = CustomFormat.compile(format, bibChipMap);
         prefs.put("CustomOutputFormat", format);
     }
 
@@ -102,100 +124,220 @@ public enum OutputProcessor {
         return bibChipMap;
     }
 
+    /**
+     * Replace the chip -> bib mappings. The map is never empty part way
+     * through, so reads being written at the same time still get their bibs.
+     *
+     * @param newMap the new chip -> bib mappings
+     */
+    public void setBibChipMap(Map<String, String> newMap) {
+        bibChipMap.putAll(newMap);
+        bibChipMap.keySet().retainAll(newMap.keySet());
+    }
+
+    /**
+     * Close every open output file. They are re-opened (in append mode) the
+     * next time a read is written to them. Called when the output directory,
+     * an output file name, or an output toggle changes.
+     */
+    public void requestCloseAll() {
+        closeRequested.set(true);
+        missingDirWarned.set(false);
+    }
+
+    /**
+     * Write out anything still queued and close all of the output files.
+     * Called when the application exits.
+     */
+    public void shutdown() {
+        try {
+            if (!outputLock.tryLock(5, TimeUnit.SECONDS)) {
+                logger.warn("Timed out waiting for the output processor, some reads may not have been saved");
+                return;
+            }
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            return;
+        }
+        try {
+            shutdown = true;
+            readQueue.drainTo(pending);
+            writePending();
+            closeWriters();
+            logger.debug("OutputProcessor shut down");
+        } catch (Exception ex) {
+            logger.error("Error shutting down the output processor", ex);
+        } finally {
+            outputLock.unlock();
+        }
+    }
+
     private void setupReadProcessor() {
-        Task readProcessTask = new Task<Void>() {
-
-            @Override
-            public Void call() {
-
-                logger.debug("OutputProcessor: setting up new read processing thread");
-                while (true) {
-                    try {
-                        logger.trace("Waiting for reads...");
-                        List<Read> newReads = new ArrayList();
-                        newReads.add(readQueue.take());
-
-                        Thread.sleep(500); // reads rarely come in 1 at a time
-
-                        readQueue.drainTo(newReads);
-                        logger.trace("Processing {} new reads", newReads.size());
-
-                        // split them into a per-reader map
-                        Map<Reader, List<Read>> readMap = new ConcurrentHashMap();
-                        newReads.forEach(r -> {
-                            if (!readMap.containsKey(r.reader())) {
-                                readMap.put(r.reader(), new ArrayList<>());
-                            }
-                            readMap.get(r.reader()).add(r);
-                        });
-
-                        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-                            readMap.entrySet().forEach(entry -> {
-                                executor.submit(() -> processReads(entry.getKey(), entry.getValue()));
-                            });
+        Runnable readProcessor = () -> {
+            logger.debug("OutputProcessor: setting up new read processing thread");
+            while (!shutdown) {
+                try {
+                    Read first = readQueue.poll(1, TimeUnit.SECONDS);
+                    if (first != null) {
+                        outputLock.lock();
+                        try {
+                            pending.add(first);
+                        } finally {
+                            outputLock.unlock();
                         }
-                    } catch (Exception ex) {
-                        logger.debug("Exception in main OutputProcesser Thread", ex);
+                        Thread.sleep(500); // reads rarely come in 1 at a time
                     }
+
+                    outputLock.lock();
+                    try {
+                        if (shutdown) return;
+                        if (closeRequested.getAndSet(false)) closeWriters();
+                        readQueue.drainTo(pending);
+                        writePending();
+                    } finally {
+                        outputLock.unlock();
+                    }
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    return;
+                } catch (Exception ex) {
+                    logger.error("Exception in the OutputProcessor thread", ex);
                 }
             }
         };
-        Thread readProcessThread = new Thread(readProcessTask);
+        Thread readProcessThread = new Thread(readProcessor);
         readProcessThread.setName("Thread-readProcessThread");
         readProcessThread.setDaemon(true);
         readProcessThread.setPriority(1);
         readProcessThread.start();
     }
 
-    private void processReads(Reader r, List<Read> reads) {
-        logger.trace("Procesing {} reads for {}", reads.size(), r.getReaderNameProperty().getValue());
+    // Must hold outputLock
+    private void writePending() {
+        if (pending.isEmpty()) return;
+        List<Read> batch = new ArrayList<>(pending);
+        pending.clear();
+        logger.trace("Processing {} new reads", batch.size());
 
-        // Make sure we are supposed to do something here
-        if (r.getOutputToFileProperty().get() && !r.getOutputFileProperty().getValue().isBlank()) {
-            String outputFile = r.getOutputFileProperty().getValue();
+        // Group the reads by output file (keeping their order)
+        File outputDir = PikaDownloaderPrefs.INSTANCE.getOutputDir();
+        boolean dirOK = outputDir != null && outputDir.isDirectory() && outputDir.canWrite();
+        Path dirPath = dirOK ? outputDir.toPath().toAbsolutePath().normalize() : null;
+
+        Map<Path, List<Read>> readsByFile = new LinkedHashMap<>();
+        Set<String> unsavedReaders = new LinkedHashSet<>();
+        int unsavedCount = 0;
+
+        for (Read read : batch) {
+            Reader r = read.reader();
+            // Make sure we are supposed to do something here
+            if (!r.getOutputToFileProperty().get()) continue;
+            String outputFile = r.getOutputFileProperty().getValueSafe();
+            if (outputFile.isBlank()) continue;
+
+            if (!dirOK) {
+                unsavedReaders.add(r.getReaderNameProperty().getValueSafe());
+                unsavedCount++;
+                continue;
+            }
+
+            Path path;
             try {
-                if (!bufferedWriterMap.containsKey(outputFile)) {
-                    try {
-                        
-                        //File file = new File(PikaDownloaderPrefs.INSTANCE.getOutputDir(), outputFile);
-                        //FileWriter fw = new FileWriter(file, true);
-                        //bufferedWriterMap.put(outputFile, new BufferedWriter(fw));
-                        Path path = Paths.get(PikaDownloaderPrefs.INSTANCE.getOutputDir().getAbsolutePath(),outputFile);
-                        BufferedWriter bw = Files.newBufferedWriter(path, 
-                            StandardOpenOption.CREATE, 
-                            StandardOpenOption.APPEND);
-                        bufferedWriterMap.put(outputFile,bw);
-                        
-                        // If the file is empty, write out the header
-                        if (Files.size(path) == 0) {
-                            bw.write(getHeadder());
-                            bw.newLine();
-                            bw.flush();
-                        }
-                    } catch (Exception ex) {
-                        logger.error(ex.getMessage());
-                        return;
-                    }
-                }
+                path = dirPath.resolve(outputFile).normalize();
+            } catch (InvalidPathException ex) {
+                logger.error("Invalid output file name \"{}\" for reader {}", outputFile, r.getReaderNameProperty().getValueSafe());
+                continue;
+            }
+            // Don't let a file name like ../foo.txt escape the output directory
+            if (!dirPath.equals(path.getParent())) {
+                logger.error("Output file \"{}\" for reader {} is not in the output directory", outputFile, r.getReaderNameProperty().getValueSafe());
+                continue;
+            }
+            readsByFile.computeIfAbsent(path, p -> new ArrayList<>()).add(read);
+        }
 
-                BufferedWriter outputFileBW = bufferedWriterMap.get(outputFile);
-                
-                // avoiding a lambda here so we can cleanly die if we have an exception
-                for (Read read : reads) {
-                    outputFileBW.write(readToString(read));
+        if (unsavedCount > 0) warnMissingOutputDir(unsavedReaders, unsavedCount);
+
+        if (readsByFile.size() == 1) {
+            readsByFile.forEach(this::writeReads);
+        } else if (!readsByFile.isEmpty()) {
+            // One task per file, so a file never has two writers
+            try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                readsByFile.forEach((path, reads) -> executor.submit(() -> writeReads(path, reads)));
+            }
+        }
+    }
+
+    private void writeReads(Path path, List<Read> reads) {
+        try {
+            logger.trace("Writing {} reads to {}", reads.size(), path);
+            BufferedWriter outputFileBW = bufferedWriterMap.get(path);
+            if (outputFileBW == null) {
+                outputFileBW = Files.newBufferedWriter(path,
+                        StandardOpenOption.CREATE,
+                        StandardOpenOption.APPEND);
+                bufferedWriterMap.put(path, outputFileBW);
+
+                // If the file is empty, write out the header
+                if (Files.size(path) == 0) {
+                    outputFileBW.write(getHeader());
                     outputFileBW.newLine();
                 }
-                outputFileBW.flush();
-
-            } catch (IOException ex) {
-                logger.error("Error writing to {} for reader {}", outputFile, r.getReaderNameProperty().getValue(), ex);
-                try {
-                    bufferedWriterMap.get(outputFile).close();
-                } catch (IOException ex1) {
-                    logger.error(ex1.getMessage());
-                }
-                bufferedWriterMap.remove(outputFile);
             }
+
+            for (Read read : reads) {
+                String line;
+                try {
+                    line = readToString(read);
+                } catch (RuntimeException ex) {
+                    // Skip the bad read, but keep going with the rest
+                    logger.error("Unable to format read {} from {}: {}", read.chip(), read.reader().getReaderNameProperty().getValueSafe(), ex.toString());
+                    continue;
+                }
+                outputFileBW.write(line);
+                outputFileBW.newLine();
+            }
+            outputFileBW.flush();
+
+        } catch (IOException ex) {
+            logger.error("Error writing {} reads to {}", reads.size(), path, ex);
+            closeWriter(path);
+        } catch (RuntimeException ex) {
+            logger.error("Unexpected error writing {} reads to {}", reads.size(), path, ex);
+        }
+    }
+
+    private void warnMissingOutputDir(Set<String> readers, int count) {
+        if (missingDirWarned.compareAndSet(false, true)) {
+            logger.error("The output directory is not set or is not writable: {} reads from {} were not saved", count, readers);
+            String readerNames = String.join(", ", readers);
+            Platform.runLater(() -> {
+                Alert alert = new Alert(AlertType.WARNING);
+                alert.setTitle("Output Directory Not Set");
+                alert.setHeaderText("Reads are not being saved");
+                alert.setContentText("The output directory is not set or is not writable, so the reads from "
+                        + readerNames + " are not being saved.\n\n"
+                        + "Select an output directory, then use Rewind to recover the missed reads.");
+                alert.show();
+            });
+        } else {
+            logger.debug("The output directory is not set: {} reads from {} were not saved", count, readers);
+        }
+    }
+
+    // Must hold outputLock
+    private void closeWriters() {
+        new ArrayList<>(bufferedWriterMap.keySet()).forEach(this::closeWriter);
+    }
+
+    private void closeWriter(Path path) {
+        BufferedWriter bw = bufferedWriterMap.remove(path);
+        if (bw == null) return;
+        try {
+            bw.close(); // flushes
+            logger.debug("Closed output file {}", path);
+        } catch (IOException ex) {
+            logger.error("Error closing {}: {}", path, ex.getMessage());
         }
     }
 
@@ -204,26 +346,25 @@ public enum OutputProcessor {
         // We are going to abuse the fact that
         // dateTime returns "YYYY-MM-dd HH:MM:ss.SSS"
         // and just split on the space
-        int firstSpace = r.dateTime().indexOf(' ');
-        String time = r.dateTime().substring(firstSpace + 1) ;
-        String date = r.dateTime().substring(0,firstSpace) ;
-                        
-        
+        String dateTime = r.dateTime() == null ? "" : r.dateTime();
+        int firstSpace = dateTime.indexOf(' ');
+        String time = firstSpace < 0 ? dateTime : dateTime.substring(firstSpace + 1);
+        String date = firstSpace < 0 ? "" : dateTime.substring(0, firstSpace);
+        String antenna = String.valueOf(r.antenna());
+
         return switch (outputFormat) {
             case RFIDServer_EXT ->
-                r.antenna().toString() + "," + r.chip() + "," + bibChipMap.getOrDefault(r.chip(), r.chip()) + ",\"" + r.dateTime() + "\"," + r.rfidReader().toString() + "," + r.antenna().toString();
-            case RFIDServer -> r.antenna().toString() + "," + r.chip() + "," + bibChipMap.getOrDefault(r.chip(), r.chip()) + ",\"" + time + "\""  ;
+                antenna + "," + r.chip() + "," + bibChipMap.getOrDefault(r.chip(), r.chip()) + ",\"" + dateTime + "\"," + r.rfidReader() + "," + antenna;
+            case RFIDServer -> antenna + "," + r.chip() + "," + bibChipMap.getOrDefault(r.chip(), r.chip()) + ",\"" + time + "\""  ;
             case ChipTime -> r.chip() + "," + time;
             case BibTime -> bibChipMap.getOrDefault(r.chip(), r.chip()) + "," + time;
             case ChipDateTime -> r.chip() + "," + date + "," + time;
             case BibDateTime -> bibChipMap.getOrDefault(r.chip(), r.chip()) + "," +  date + "," + time;
-            case CUSTOM -> processCustomOutputString(r); 
+            case CUSTOM -> compiledFormat.render(r);
         };
-
-        
     }
-    
-    private String getHeadder(){
+
+    private String getHeader(){
         return switch (outputFormat){
             case RFIDServer_EXT -> "Ant,Chip,Bib,DateTime,reader,Ant";
             case RFIDServer -> "Ant,Chip,Bib,Time";
@@ -231,157 +372,8 @@ public enum OutputProcessor {
             case BibTime -> "Bib,Time";
             case ChipDateTime -> "Chip,Date,Time";
             case BibDateTime -> "Bib,Date,Time";
-            case CUSTOM -> customOutputStringHeader(); 
+            case CUSTOM -> compiledFormat.header();
         };
-    }
-    
-    private String customOutputStringHeader() {
-        logger.debug("Creating header for customFormat: {}",customFormat);
-        if (customFormat == null) return "";
-        else if (customFormat.isBlank()) return "";
-
-        Matcher matcher = TOKEN_PATTERN.matcher(customFormat);
-        StringBuilder sb = new StringBuilder(customFormat.length());
-
-        while (matcher.find()) {
-            // Check if Group 1 found a backslash
-            boolean isEscaped = matcher.group(1) != null;
-
-            if (isEscaped) {
-                // Strip the backslash and keep the rest of the match exactly as literal text
-                String literalToken = matcher.group().substring(1);
-                matcher.appendReplacement(sb, Matcher.quoteReplacement(literalToken));
-                continue;
-            }
-
-            String tokenName;
-            String parameter = null;
-
-            // Determine if it was a %TOKEN or ${TOKEN} style match
-            if (matcher.group(2) != null) {
-                tokenName = matcher.group(2).toLowerCase();
-            } else {
-                tokenName = matcher.group(3).toLowerCase();
-                parameter = matcher.group(4);
-            }
-
-            // 2. Perform property replacement mapping
-            String replacement = switch (tokenName) {
-                case "b", "bib" -> "Bib";
-                case "c", "chip" -> "Chip";
-                case "a", "antenna" -> "Ant";
-                case "r", "reader" -> "Reader";
-                //case "dt", "datetime" ->
-                //    read.dateTime();
-                case "e", "epochmilli" -> "EpochMilli";
-                case "z","tz", "timezone" -> "Timezone";
-                case "d", "date" -> "Date";
-                case "t", "time" -> "Time";
-                case "dt", "datetime"-> "DateTime";
-                // Unrecognized properties return null here to trigger the default fallback logic
-                default ->
-                    null;
-            };
-
-            // 3. Fallback: If property is missing, leave the text completely intact
-            if (replacement == null) {
-                replacement = matcher.group();
-            }
-
-            matcher.appendReplacement(sb, Matcher.quoteReplacement(replacement));
-        }
-        matcher.appendTail(sb);
-
-        return sb.toString();
-        
-    }
-
-    private String processCustomOutputString(Read read) {
-        logger.debug("Processing read with custom customFormat: {}",customFormat);
-        if (customFormat == null) return "";
-        else if (customFormat.isBlank()) return "";
-
-        Matcher matcher = TOKEN_PATTERN.matcher(customFormat);
-        StringBuilder sb = new StringBuilder(customFormat.length());
-
-        while (matcher.find()) {
-            // Check if Group 1 found a backslash
-            boolean isEscaped = matcher.group(1) != null;
-
-            if (isEscaped) {
-                // Strip the backslash and keep the rest of the match exactly as literal text
-                String literalToken = matcher.group().substring(1);
-                matcher.appendReplacement(sb, Matcher.quoteReplacement(literalToken));
-                continue;
-            }
-
-            String tokenName;
-            String parameter = null;
-
-            // Determine if it was a %TOKEN or ${TOKEN} style match
-            if (matcher.group(2) != null) {
-                tokenName = matcher.group(2).toLowerCase();
-            } else {
-                tokenName = matcher.group(3).toLowerCase();
-                parameter = matcher.group(4);
-            }
-
-            
-            // 2. Perform property replacement mapping
-            String replacement = switch (tokenName) {
-                case "b", "bib" ->
-                    bibChipMap.getOrDefault(read.chip(), read.chip());
-                case "c", "chip" ->
-                    read.chip();
-                case "a", "antenna" ->
-                    read.antenna().toString();
-                case "r", "reader" ->
-                    read.rfidReader().toString();
-                case "s", "rssi" ->
-                    read.rssi().toString();
-                case "e", "epochmilli" ->
-                    read.epochMilli().toString();
-                case "z","tz", "timezone" -> 
-                    read.tz();
-                case "d", "date", "t", "time", "dt", "datetime"-> {
-                    
-                    if (parameter == null) {
-                        // We are going to abuse the fact that
-                        // dateTime returns "YYYY-MM-dd HH:MM:ss.SSS"
-                        // and just split on the space
-                        yield switch (tokenName){
-                            case "dt", "datetime" -> read.dateTime();
-                            case "d","date" -> read.dateTime().split("\\s+", 2)[0];
-                            case "t", "time" -> read.dateTime().split("\\s+", 2)[1];
-                            default -> read.dateTime();
-                        };
-                    } else {
-                        LocalDateTime localDateTime = LocalDateTime.ofInstant(
-                            Instant.ofEpochMilli(read.epochMilli()),
-                            ZoneId.of(read.tz())
-                        );
-                        try {
-                            yield localDateTime.format(DateTimeFormatter.ofPattern(parameter));
-                        } catch (IllegalArgumentException e) {
-                            yield "[Invalid DateTimeFormatter Pattern: " + parameter + "]";
-                        }
-                    }
-                }
-                // Unrecognized properties return null here to trigger the default fallback logic
-                default ->
-                    null;
-            };
-
-            // 3. Fallback: If property is missing, leave the text completely intact
-            if (replacement == null) {
-                replacement = matcher.group();
-            }
-
-            matcher.appendReplacement(sb, Matcher.quoteReplacement(replacement));
-        }
-        matcher.appendTail(sb);
-
-        return sb.toString();
     }
 
 }

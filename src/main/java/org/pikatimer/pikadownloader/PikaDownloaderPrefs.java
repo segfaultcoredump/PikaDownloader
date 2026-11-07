@@ -18,13 +18,27 @@ public enum PikaDownloaderPrefs {
     INSTANCE;
     
     private static final Preferences prefs = Preferences.userRoot().node("PikaDownloader");
-    private File outputDir = null;
+    private volatile File outputDir = null;
     private String echoEndpoint = "";
     private Application application;
     ObservableList<Reader> readerList;
            
     public Preferences getPreferences(){
         return prefs;
+    }
+
+    /**
+     * @param path a directory path (may be null)
+     * @return the path if it is an existing directory, otherwise the user's
+     * home directory. Use this for FileChooser / DirectoryChooser initial 
+     * directories: Windows throws if the initial directory doesn't exist.
+     */
+    public static File directoryOrHome(String path) {
+        if (path != null && !path.isBlank()) {
+            File dir = new File(path);
+            if (dir.isDirectory()) return dir;
+        }
+        return new File(System.getProperty("user.home"));
     }
 
     public File getOutputDir(){

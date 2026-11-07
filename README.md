@@ -31,7 +31,7 @@ The system accepts a string with embeded escape codes that represent various fie
 
 ## Examples
 
-A custom output format of **`$C,"$DT",%Z, %{EpochMilli}`** would result in the following output:
+A custom output format of **`$C,"$DT",%Z,%{EpochMilli}`** would result in the following output:
 > `1234,"2026-07-19 11:10:43.524",-06:00,1784481043524`
 
 Note that escape codes are case insensitive. You can preface the codes with either a $ or %. Codes can also be enclosed with curly brackets ({}). 

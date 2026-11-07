@@ -17,14 +17,19 @@
 package org.pikatimer.pikadownloader;
 
 import org.pikatimer.pikadownloader.util.AlphanumericComparator;
+import org.pikatimer.pikadownloader.util.BibChipFileParser;
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.UnaryOperator;
 import java.util.prefs.Preferences;
 import java.util.regex.Pattern;
@@ -89,6 +94,9 @@ public class FXMLSetupBibMapController  {
 
 
         
+    // Sanity limit for the "add a range of bibs" button
+    private static final int MAX_REPEATING_MAPPINGS = 100000;
+
     private final ObservableList<ChipMap> chipMapList = FXCollections.observableArrayList();
     FilteredList<ChipMap> filteredchipMapList;
     SortedList<ChipMap> sortedTimeList;
@@ -208,7 +216,7 @@ public class FXMLSetupBibMapController  {
         // no leading spaces, no leading zeroes
         // we remove trailing spaces on focus lost
         chipTextField.textProperty().addListener((observable, oldValue, newValue) -> {
-            logger.debug("TextField Text Changed (newValue: " + newValue + ")");
+            logger.trace("TextField Text Changed (newValue: {})", newValue);
             if (!newValue.isEmpty()) {
                 
 
@@ -228,7 +236,7 @@ public class FXMLSetupBibMapController  {
         });
         
         bibTextField.textProperty().addListener((observable, oldValue, newValue) -> {
-            logger.debug("TextField Text Changed (newValue: " + newValue + ")");
+            logger.trace("TextField Text Changed (newValue: {})", newValue);
             if (!newValue.isEmpty()) {
                 
 
@@ -264,147 +272,153 @@ public class FXMLSetupBibMapController  {
     
     public void importAction(ActionEvent fxevent){
         FileChooser fileChooser = new FileChooser();
-        File sourceFile;
-        final BooleanProperty chipFirst = new SimpleBooleanProperty(false);
-        
+
         fileChooser.setTitle("Select Bib -> Chip File");
-        
-        String defaultDirectory = pikaPrefs.get("BibChipFileDir", System.getProperty("user.home"));
-        fileChooser.setInitialDirectory(Path.of(defaultDirectory).toFile()); 
-        
+
+        // The initial directory must exist (Windows throws if it doesn't)
+        fileChooser.setInitialDirectory(PikaDownloaderPrefs.directoryOrHome(pikaPrefs.get("BibChipFileDir", "")));
+
         fileChooser.getExtensionFilters().addAll(
                 new FileChooser.ExtensionFilter("Text Files", "*.txt","*.csv"),
-                new FileChooser.ExtensionFilter("CSV Files", "*.csv"), 
+                new FileChooser.ExtensionFilter("CSV Files", "*.csv"),
                 new FileChooser.ExtensionFilter("All files", "*")
             );
-        
-        sourceFile = fileChooser.showOpenDialog(importButton.getScene().getWindow());
-        if (sourceFile != null) {
+
+        File sourceFile = fileChooser.showOpenDialog(importButton.getScene().getWindow());
+        if (sourceFile == null) return;
+        if (sourceFile.getParentFile() != null) {
             pikaPrefs.put("BibChipFileDir", sourceFile.getParentFile().getAbsolutePath());
-            try {            
-                    Optional<String> fs = Files.lines(sourceFile.toPath()).findFirst();
-                    String[] t = fs.get().split(",", -1);
-                    if (t.length != 2) return; 
-                    
-                    if(t[0].toLowerCase().contains("chip")) {
-                        chipFirst.set(true);
-                        logger.debug("Found a chip -> bib file");
-                    } else if (t[0].toLowerCase().contains("bib")) {
-                        chipFirst.set(false);
-                        logger.debug("Found a bib -> chip file");
-                    } else {
-                        ChipMap newMapping = new ChipMap(t[1],t[0]);
-                        if (chipMapList.contains(newMapping)) chipMapList.remove(newMapping);
-        
-                        chipMapList.add(newMapping);
-                        
-                        mapModified.setValue(true);    
-                        
-                        logger.debug("No header in file. Assuming bib -> chip.");
-                        logger.debug("Mapped chip " + t[1] + " to " + t[0]);
-                    }
-                    Files.lines(sourceFile.toPath())
-                        .map(s -> s.trim())
-                        .filter(s -> !s.isEmpty())
-                        .skip(1)
-                        .forEach(s -> {
-                            logger.trace("readOnce read " + s); 
-                            String[] tokens = s.split(",", -1);
-                            if (t.length != 2) return; 
-                            ChipMap newMapping;
-                            if(chipFirst.get()) {
-                                newMapping = new ChipMap(tokens[0],tokens[1]);
-                                logger.debug("Mapped chip " + tokens[0] + " to " + tokens[1]);
-                            } else {
-                                newMapping = new ChipMap(tokens[1],tokens[0]);
-                                logger.debug("Mapped chip " + tokens[1] + " to " + tokens[0]);
-                            }
-                            
-                            if (chipMapList.contains(newMapping)) chipMapList.remove(newMapping);
-        
-                            chipMapList.add(newMapping);
-                            
-                            mapModified.setValue(true);
-                            
-                            
-                        });
-                    logger.debug("Found a total of " + chipMapList.size() + " mappings");
-                    
-                } catch (IOException ex) {
-                    logger.warn("Error Reading file {}",sourceFile.getAbsolutePath(),ex);
-                    // We had an issue reading the file.... 
-                }
-            
-            
+        }
+
+        List<String> lines;
+        try {
+            lines = readLines(sourceFile.toPath());
+        } catch (IOException ex) {
+            logger.warn("Error Reading file {}",sourceFile.getAbsolutePath(),ex);
+            showAlert(Alert.AlertType.ERROR, "Unable to read " + sourceFile.getName(), ex.getMessage());
+            return;
+        }
+
+        BibChipFileParser.Result result = BibChipFileParser.parse(lines);
+        if (result.error() != null) {
+            showAlert(Alert.AlertType.WARNING, "Unable to import " + sourceFile.getName(), result.error());
+            return;
+        }
+
+        mergeMappings(result.chipToBib());
+        logger.debug("Imported {} mappings from {}, {} lines skipped. {} total mappings",
+                result.chipToBib().size(), sourceFile.getAbsolutePath(), result.skipped().size(), chipMapList.size());
+
+        if (!result.skipped().isEmpty()) {
+            List<String> skipped = result.skipped();
+            StringBuilder msg = new StringBuilder();
+            msg.append("Imported ").append(result.chipToBib().size()).append(" mappings.\n\n")
+               .append(skipped.size()).append(" lines did not have both a bib and a chip and were skipped:\n");
+            skipped.stream().limit(10).forEach(s -> msg.append(s).append("\n"));
+            if (skipped.size() > 10) msg.append("...and ").append(skipped.size() - 10).append(" more");
+            showAlert(Alert.AlertType.WARNING, "Some lines were skipped", msg.toString());
         }
     }
-    
-    public void addRepeatingMappingButtonAction(ActionEvent fxevent){
-        
-        if (startBibTextField.getText().isEmpty() || endBibTextField.getText().isEmpty() || chipOffsetTextField.getText().isEmpty()) return;
-        
+
+    // Read the file as UTF-8, falling back to ISO-8859-1 for files saved
+    // with a legacy (e.g. Windows) encoding
+    private static List<String> readLines(Path path) throws IOException {
         try {
-            Integer start = Integer.valueOf(startBibTextField.getText());
-            Integer end = Integer.valueOf(endBibTextField.getText());
-            Integer offset = Integer.valueOf(chipOffsetTextField.getText());
+            return Files.readAllLines(path, StandardCharsets.UTF_8);
+        } catch (CharacterCodingException ex) {
+            return Files.readAllLines(path, StandardCharsets.ISO_8859_1);
+        }
+    }
+
+    // Add (or replace) mappings in one pass, then update the table once
+    private void mergeMappings(Map<String, String> chipToBib) {
+        if (chipToBib.isEmpty()) return;
+        Map<String, ChipMap> merged = new LinkedHashMap<>();
+        chipMapList.forEach(m -> merged.put(m.chip(), m));
+        chipToBib.forEach((chip, bib) -> merged.put(chip, new ChipMap(chip, bib)));
+        chipMapList.setAll(merged.values());
+        mapModified.setValue(true);
+    }
+
+    private void showAlert(Alert.AlertType type, String header, String content) {
+        Alert alert = new Alert(type);
+        alert.setTitle("Chip to Bib Map Setup");
+        alert.setHeaderText(header);
+        alert.setContentText(content);
+        alert.showAndWait();
+    }
+
+    public void addRepeatingMappingButtonAction(ActionEvent fxevent){
+
+        if (startBibTextField.getText().isEmpty() || endBibTextField.getText().isEmpty() || chipOffsetTextField.getText().isEmpty()) return;
+
+        try {
+            long start = Long.parseLong(startBibTextField.getText());
+            long end = Long.parseLong(endBibTextField.getText());
+            long offset = Long.parseLong(chipOffsetTextField.getText());
             if (start == 0) start = 1;
             if (end < start ) {
-                Integer tmp = start;
+                long tmp = start;
                 start = end;
                 end = tmp;
             }
-            Integer chip = 1;
-            Integer bib = 1;
-            for(int i = start; i <= end; i++) {
-                bib = i;
-                chip = i + offset;
-                ChipMap newMapping = new ChipMap(chip.toString(),bib.toString());
-                if (chipMapList.contains(newMapping)) chipMapList.remove(newMapping);
-        
-                chipMapList.add(newMapping);
-                mapModified.setValue(true);
+            if (end - start + 1 > MAX_REPEATING_MAPPINGS) {
+                showAlert(Alert.AlertType.WARNING, "Too many mappings",
+                        "A range can add at most " + MAX_REPEATING_MAPPINGS + " mappings at a time.");
+                return;
             }
-            
-        } catch (Exception ex){
-            logger.debug(ex.getMessage());
+            Map<String, String> chipToBib = new LinkedHashMap<>();
+            for(long bib = start; bib <= end; bib++) {
+                chipToBib.put(Long.toString(bib + offset), Long.toString(bib));
+            }
+            mergeMappings(chipToBib);
+
+        } catch (NumberFormatException ex){
+            logger.debug("Invalid repeating mapping: {}", ex.getMessage());
+            showAlert(Alert.AlertType.WARNING, "Invalid range", "The start bib, end bib, and chip offset must be whole numbers.");
+            return;
         }
         startBibTextField.setText("");
         endBibTextField.setText("");
         chipOffsetTextField.setText("");
     }
     public void addMappingButtonAction(ActionEvent fxevent){
-        ChipMap newMapping = new ChipMap(chipTextField.getText(),bibTextField.getText());
+        String chip = chipTextField.getText() == null ? "" : chipTextField.getText().trim();
+        String bib = bibTextField.getText() == null ? "" : bibTextField.getText().trim();
+        if (chip.isEmpty() || bib.isEmpty()) return; // Need both a chip and a bib
+
+        ChipMap newMapping = new ChipMap(chip,bib);
         if (chipMapList.contains(newMapping)) chipMapList.remove(newMapping);
-        
+
         chipMapList.add(newMapping);
-        
-        mapModified.setValue(true);  
-        
+
+        mapModified.setValue(true);
+
         chipTextField.setText("");
         bibTextField.setText("");
         chipTextField.requestFocus();
     }
-    
+
     public void clearAllAction(ActionEvent fxevent){
         chipMapList.clear();
         mapModified.setValue(true);
     }
-    
+
     @FXML
     public void saveButtonAction(ActionEvent fxevent){
         logger.debug("BibChipMapController: Save button pushed...");
         try {
-        Map<String,String> bibMap = new ConcurrentHashMap();
-        
+        Map<String,String> bibMap = new HashMap<>();
+
         chipMapList.forEach(m -> bibMap.put(m.chip(), m.bib()));
-                
-        OutputProcessor.INSTANCE.getBibChipMap().clear();
-        OutputProcessor.INSTANCE.getBibChipMap().putAll(bibMap);
-        
-        
+
+        // Swap the mappings in without the map ever being empty part way through
+        OutputProcessor.INSTANCE.setBibChipMap(bibMap);
+
+
         mapModified.setValue(false);
-        
-        
+
+
         Stage stage = (Stage) ((Node) fxevent.getSource()).getScene().getWindow();
             if (stage != null) {
                 logger.debug("Calling stage.close()");
@@ -412,10 +426,9 @@ public class FXMLSetupBibMapController  {
             }
         } catch (Exception e) {
         logger.error("Failed to save and close window", e);
-        e.printStackTrace(); // Ensures it prints to your standard console output
     }
     }
-    
+
     public void cancelButtonAction(ActionEvent fxevent){
         // We will just kick off the onClose action below
         ((Node) fxevent.getSource()).getScene().getWindow().fireEvent(
@@ -425,37 +438,28 @@ public class FXMLSetupBibMapController  {
             )
         );
     }
-    
+
+    // Compile the search pattern once per change, not once per row
     private void updateFilterPredicate(){
-        filteredchipMapList.setPredicate(chipMap -> {
-            // If filter text is empty, display all persons.
-            logger.trace("filteredParticpantsList.predicateProperty changing...");
+        String filter = searchTextField.textProperty().getValueSafe();
+        if (filter.isEmpty()) {
+            filteredchipMapList.setPredicate(chipMap -> true);
+            return;
+        }
 
-            if (searchTextField.textProperty().getValueSafe().isEmpty()) {
-                logger.trace("...both are empty: true");
-                return true;
-            }
-
-            // Compare first name and last name of every person with filter text.
-            String lowerCaseFilter = "(.*)(" + searchTextField.textProperty().getValueSafe() + ")(.*)";
-            try {
-                Pattern pattern =  Pattern.compile(lowerCaseFilter, Pattern.CASE_INSENSITIVE);
-
-                if (    
-                        pattern.matcher(chipMap.chip()).matches() ||
-                        pattern.matcher(chipMap.bib()).matches()) {
-                    return true; // Filter matches first/last/bib.
-                } 
-
-            } catch (PatternSyntaxException e) {
-                
-                return true;
-            }
-            return false; // Does not match.
-        });
+        Pattern pattern;
+        try {
+            pattern = Pattern.compile(filter, Pattern.CASE_INSENSITIVE);
+        } catch (PatternSyntaxException e) {
+            // Not a valid regex (yet), show everything
+            filteredchipMapList.setPredicate(chipMap -> true);
+            return;
+        }
+        filteredchipMapList.setPredicate(chipMap ->
+                pattern.matcher(chipMap.chip()).find() || pattern.matcher(chipMap.bib()).find());
     }
 
-    
+
     private record ChipMap (String chip, String bib){
         @Override
         public boolean equals(Object o) {

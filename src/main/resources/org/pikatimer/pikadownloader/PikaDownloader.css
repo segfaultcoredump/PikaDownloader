@@ -53,3 +53,14 @@
 .choice-box.profile-choice-box:disabled > .open-button > .arrow {
     -fx-opacity: 0.3;
 }
+
+/* -------------------------------------------------------------
+   Invalid text fields (e.g. a bad output file name in a reader cell).
+   Matches the inline errorCSS used for the output directory field
+   in FXMLmainController.
+   ------------------------------------------------------------- */
+.text-field.invalid-field {
+    -fx-text-box-border: #FF0000;
+    -fx-focus-color: #FF0000;
+    -fx-control-inner-background: #FFF5F5;
+}

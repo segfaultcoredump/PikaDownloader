@@ -32,7 +32,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
     </appender>
     <!-- <appender name="DebugLogHolder" class="com.pikatimer.pikareader.util.DebugLogHolder"/> -->
     <!-- <appender name="FILE" class="ch.qos.logback.core.FileAppender">
-        <file>${java.io.tmpdir}/PikaReciever-${dateStamp}.log</file>
+        <file>${java.io.tmpdir}/PikaDownloader-${dateStamp}.log</file>
         <append>true</append>
         <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
             <level>TRACE</level>
@@ -42,7 +42,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         </encoder>
     </appender> -->
     <appender name="ROLLING" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${java.io.tmpdir}/PikaReciever-${dateStamp}.log</file>
+        <file>${java.io.tmpdir}/PikaDownloader-${dateStamp}.log</file>
     
 
        
@@ -50,24 +50,27 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             <level>TRACE</level>
         </filter>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-        <fileNamePattern>${java.io.tmpdir}/PikaReciever-%d{yyyy-MM-dd}.log</fileNamePattern>
+        <fileNamePattern>${java.io.tmpdir}/PikaDownloader-%d{yyyy-MM-dd}.log</fileNamePattern>
         <!-- Clean history right when the app boots up -->
         <cleanHistoryOnStart>true</cleanHistoryOnStart>
         <!-- Acts as your safety net for total disk space -->
-        <totalSizeCap>500MB</totalSizeCap> 
+        <!-- totalSizeCap is ignored unless maxHistory is set -->
+        <maxHistory>14</maxHistory>
+        <totalSizeCap>500MB</totalSizeCap>
     </rollingPolicy>
 
         <encoder>
             <pattern>%d{yyyy-MM-dd HH:mm:ss.SSSS} [%thread] %-5level %logger{50} - %msg%n</pattern>
         </encoder>
     </appender>
-    <root level="TRACE"> 
+    <root level="INFO">
         <appender-ref ref="STDOUT" />
         <appender-ref ref="ROLLING" />
     </root>
     
     <logger name="org.java_websocket" level="INFO" />
-    <logger name="org.pikatimer" level="TRACE" />
+    <!-- Set to TRACE to log every websocket message and read -->
+    <logger name="org.pikatimer" level="DEBUG" />
     
     
 </configuration>

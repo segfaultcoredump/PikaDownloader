@@ -37,6 +37,7 @@ import javafx.scene.control.TextField;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -232,6 +233,19 @@ public class FXMLmainController {
             logger.debug("CustomOutputFormat Changed: {} -> {}", oldValue, newValue);
         });
 
+        // Restore the output directory from the last run (if it is still usable)
+        // so reads from readers that come back with their output turned on are saved
+        String savedOutputDir = pikaPrefs.getPreferences().get("outputDir", "");
+        if (!savedOutputDir.isBlank()) {
+            File dir = new File(savedOutputDir);
+            if (dir.isDirectory() && dir.canWrite()) {
+                pikaPrefs.setOutputDir(dir);
+                ouputDirTextField.setText(dir.getAbsolutePath());
+                logger.debug("Restored the output directory: {}", dir.getAbsolutePath());
+            } else {
+                logger.warn("The saved output directory {} is no longer available", savedOutputDir);
+            }
+        }
     }
 
     private void addLocalDialog() {
@@ -309,11 +323,16 @@ public class FXMLmainController {
                                 DatagramPacket receivePacket = new DatagramPacket(recvBuf, recvBuf.length);
                                 broadcastSocket.receive(receivePacket);
 
-                                String message = new String(receivePacket.getData()).trim();
+                                String message = new String(receivePacket.getData(), 0, receivePacket.getLength(), StandardCharsets.UTF_8).trim();
 
-                                logger.debug("PikaReader Discover Response: " + receivePacket.getAddress().getHostAddress() + " \"" + message + "\"");
+                                logger.debug("PikaReader Discover Response: {} \"{}\"", receivePacket.getAddress().getHostAddress(), message);
 
-                                String[] msg = message.split(" ");
+                                // PIKA_READER <unitID> <port>
+                                String[] msg = message.split("\\s+");
+                                if (msg.length < 3) {
+                                    logger.debug("Ignoring a malformed discovery response from {}", receivePacket.getAddress().getHostAddress());
+                                    continue;
+                                }
 
                                 if (msg[0].equalsIgnoreCase("PIKA_READER")) {
                                     DiscoveredLocalReader u = new DiscoveredLocalReader(receivePacket.getAddress().getHostAddress());
@@ -671,25 +690,24 @@ public class FXMLmainController {
         File selectedDirectory = pikaPrefs.getOutputDir();
         
         // If it has not been set yet, pull from the prefs
-        // Default to the user's home directory
-        if (selectedDirectory == null) {
-            String defaultOutputDir = pikaPrefs.getPreferences().get("outputDir", System.getProperty("user.home"));
-            selectedDirectory = Path.of(defaultOutputDir).toFile();
-        }
-        
-        
+        // Default to the user's home directory.
+        // The initial directory must exist (Windows throws if it doesn't)
+        String initialDir = selectedDirectory != null
+                ? selectedDirectory.getAbsolutePath()
+                : pikaPrefs.getPreferences().get("outputDir", "");
+
         DirectoryChooser directoryChooser = new DirectoryChooser();
-        if (selectedDirectory != null) {
-            directoryChooser.setInitialDirectory(selectedDirectory);
-        }
+        directoryChooser.setInitialDirectory(PikaDownloaderPrefs.directoryOrHome(initialDir));
 
         selectedDirectory = directoryChooser.showDialog(outputDirButton.getScene().getWindow());
 
         if (selectedDirectory != null && selectedDirectory.isDirectory() && selectedDirectory.canWrite()) {
             ouputDirTextField.setText(selectedDirectory.getAbsolutePath());
-            logger.debug(selectedDirectory.getAbsolutePath());
+            logger.debug("Output directory set to {}", selectedDirectory.getAbsolutePath());
             pikaPrefs.setOutputDir(selectedDirectory);
             pikaPrefs.getPreferences().put("outputDir", selectedDirectory.getAbsolutePath());
+            // Close the files in the old directory, new reads go to the new one
+            OutputProcessor.INSTANCE.requestCloseAll();
         }
     }
 

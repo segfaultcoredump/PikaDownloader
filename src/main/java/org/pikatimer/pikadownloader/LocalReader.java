@@ -16,32 +16,31 @@
  */
 package org.pikatimer.pikadownloader;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
+import java.net.ConnectException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.net.URL;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -64,6 +63,8 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.concurrent.Task;
 import javafx.fxml.FXMLLoader;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Alert.AlertType;
 import javafx.scene.Node;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
@@ -80,6 +81,7 @@ import org.slf4j.LoggerFactory;
 import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
 import org.json.JSONArray;
+import org.json.JSONException;
 
 /**
  *
@@ -87,9 +89,20 @@ import org.json.JSONArray;
  */
 public class LocalReader implements Reader {
     final Preferences prefs = PikaDownloaderPrefs.INSTANCE.getPreferences();
-    final Set<Read> processedReads = new HashSet();
-    
+
+    // Every read seen this session (kept for a future read review / search feature).
+    // Written by the websocket and rewind threads, read by the FX thread.
+    final Set<Read> processedReads = ConcurrentHashMap.newKeySet();
+
     static final Logger logger = LoggerFactory.getLogger(LocalReader.class);
+
+    // One shared thread for all of the reconnect attempts
+    private static final ScheduledExecutorService RECONNECT = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable);
+        thread.setDaemon(true);
+        thread.setName("ws-reconnect");
+        return thread;
+    });
     
     private StringProperty readerIPProperty = new SimpleStringProperty();
     private StringProperty readerPortProperty = new SimpleStringProperty();
@@ -110,16 +123,23 @@ public class LocalReader implements Reader {
     private IntegerProperty readCountProperty = new SimpleIntegerProperty(0);
     
     private IntegerProperty lastUpdatedProperty = new SimpleIntegerProperty(0);
-    private LocalDateTime lastUpdated = LocalDateTime.MIN;
+    private volatile LocalDateTime lastUpdated = LocalDateTime.MIN;
     
     private StringProperty outputFileProperty = new SimpleStringProperty();
     private BooleanProperty outputToFileProperty = new SimpleBooleanProperty(false);
     
     private static final BlockingQueue<Read> outputProcessorQueue = OutputProcessor.INSTANCE.getReadQueue();
     
-    private Read lastRead = null;
-    
+    private volatile Read lastRead = null;
+
     private BooleanProperty enabledProperty = new SimpleBooleanProperty(true);
+
+    // Pref key for the output file name. Captured once (the unit ID from
+    // discovery) because the STATUS messages may change the case of the name
+    private final String outputPrefKey;
+
+    // True while a connection attempt is in progress
+    private final AtomicBoolean connecting = new AtomicBoolean(false);
 
     // Reader profiles (PikaReader 6684b90 and newer).
     // Older PikaReader versions do not send a profile in their STATUS messages,
@@ -134,31 +154,35 @@ public class LocalReader implements Reader {
     private static final HttpClient httpClient = HttpClient.newHttpClient();
 
     Thread pikaConnectionThread;
-    private EventWebSocketClient webSocketClient;
-    
+    private volatile EventWebSocketClient webSocketClient;
+
     Timeline timeline;
-    
+
     public LocalReader(String reader_ip, String port, String reader_id){
-        readerIPProperty.setValue(reader_ip); 
+        readerIPProperty.setValue(reader_ip);
         //readerIDProperty.setValue(reader_id);
         readerNameProperty.setValue(reader_id);
         readerPortProperty.setValue(port);
-        
+        outputPrefKey = "LOCAL-READER-OUTPUT-" + reader_id;
+
         //Connect to the reader
         connect();
-        
-        outputFileProperty.setValue(prefs.get("LOCAL-READER-OUTPUT-" + readerNameProperty.getValue(), ""));
+
+        outputFileProperty.setValue(prefs.get(outputPrefKey, ""));
         if(!outputFileProperty.isEmpty().get()) outputToFileProperty.set(true);
-        
-        
+
+
         outputFileProperty.addListener((observable, oldValue, newValue)  -> {
-            logger.trace("Output File Update for " + reader_id + " -> " + newValue);
-            prefs.put("LOCAL-READER-OUTPUT-" + readerNameProperty.getValue(), newValue);
+            logger.trace("Output File Update for {} -> {}", reader_id, newValue);
+            prefs.put(outputPrefKey, newValue == null ? "" : newValue);
+            // Close the old file
+            OutputProcessor.INSTANCE.requestCloseAll();
         });
-        
-        
-    
-        
+
+        // Close the file when the output is turned off
+        outputToFileProperty.addListener((observable, oldValue, newValue) -> {
+            if (!newValue) OutputProcessor.INSTANCE.requestCloseAll();
+        });
     }
     
     @Override
@@ -181,11 +205,17 @@ public class LocalReader implements Reader {
         return controlPane;
     }
     
+    // Must be called on the FX thread
     private void connect() {
         if (connectedProperty.get()) {
             return; // already connected
         }
-        
+        if (!connecting.compareAndSet(false, true)) {
+            return; // a connection attempt is already in progress
+        }
+
+        if (timeline != null) timeline.stop();
+
         // lets periodically update stuff
         timeline = new Timeline(
             new KeyFrame(javafx.util.Duration.seconds(1), event -> {
@@ -198,8 +228,8 @@ public class LocalReader implements Reader {
                 // update the last updated counter
                 if (lastUpdated != null) {
                     lastUpdatedProperty.setValue(Duration.between(lastUpdated, LocalDateTime.now()).toSeconds());
-                    logger.trace("Reader::setStatus: lastUpdated " + lastUpdatedProperty.getValue().toString() + " ago");
-                }            
+                    logger.trace("Reader::setStatus: lastUpdated {} ago", lastUpdatedProperty.getValue());
+                }
             })
         );
         timeline.setCycleCount(Animation.INDEFINITE);
@@ -214,21 +244,26 @@ public class LocalReader implements Reader {
                 try {
                     // Start listening for events....
                     String wsPikaURL = "ws://" + readerIPProperty.getValue() + ":" + readerPortProperty.getValueSafe() + "/events";
-                    logger.debug("Connecting to wsPikaURL: " + wsPikaURL);
-                    webSocketClient = new EventWebSocketClient(wsPikaURL, reader);
-                    webSocketClient.setDaemon(true);
-                    webSocketClient.connectBlocking(10, TimeUnit.SECONDS);
-                    
+                    logger.debug("Connecting to wsPikaURL: {}", wsPikaURL);
+                    EventWebSocketClient client = new EventWebSocketClient(wsPikaURL, reader);
+                    webSocketClient = client;
+                    client.setDaemon(true);
+                    client.connectBlocking(10, TimeUnit.SECONDS);
+
 
                     Platform.runLater(() -> {
-                        if (webSocketClient.isOpen()) {
+                        if (client.isOpen()) {
                             statusLabel.setValue("Connected to\n" + wsPikaURL);
                             connectedProperty.setValue(true);
-                            
+
                         }
                     });
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
                 } catch (Exception ex) {
-                    logger.error("ReacerConnection error: {} {}",readerNameProperty.getValueSafe(),ex.getMessage(),ex);
+                    logger.error("Reader connection error: {} {}",readerNameProperty.getValueSafe(),ex.getMessage(),ex);
+                } finally {
+                    connecting.set(false);
                 }
                 return null;
             }
@@ -240,38 +275,54 @@ public class LocalReader implements Reader {
     }
     
     private void processLine(String line) {
-        JSONObject message = new JSONObject(line);
+        JSONObject message;
+        try {
+            message = new JSONObject(line);
+        } catch (JSONException ex) {
+            logger.warn("Ignoring a malformed message from {}: {}", readerNameProperty.getValueSafe(), ex.getMessage());
+            return;
+        }
         String type = message.optString("type", "UNKNOWN");
-        logger.debug("LocalReader::processLine: {}",type);
-        switch (type) {
-            case "READ" ->  processRead(message, false);
-            case "STATUS" ->  processStatus(message);
-            default ->  logger.debug("Unknown: \"" + line.substring(0, 1) + "\" " + line);
+        logger.trace("LocalReader::processLine: {}",type);
+        try {
+            switch (type) {
+                case "READ" ->  processRead(message, false);
+                case "STATUS" ->  processStatus(message);
+                default ->  logger.debug("Unknown message from {}: {}", readerNameProperty.getValueSafe(), line);
+            }
+        } catch (RuntimeException ex) {
+            logger.warn("Unable to process a {} message from {}: {}", type, readerNameProperty.getValueSafe(), line, ex);
         }
     }
 
     private void processStatus(JSONObject status) {
-        logger.debug("Reader Status: {} -> {}",readerNameProperty.getValue(),status.toString());
-        // Snag battery status       
+        logger.trace("Reader Status: {} -> {}",readerNameProperty.getValue(),status);
+
+        // Pull everything out of the message here, only update the properties on the FX thread
+        String unitID = status.optString("unitID", "");
+        double battery = status.optDouble("battery", -1);
+        boolean hasReading = status.has("reading");
+        boolean reading = status.optBoolean("reading", false);
+        JSONObject profile = status.optJSONObject("profile");
+
         Platform.runLater(() -> {
-            
-            // Name 
-            readerNameProperty.setValue(status.getString("unitID"));
-            
+
+            // Name
+            if (!unitID.isBlank()) readerNameProperty.setValue(unitID);
+
             // Battery
-            if (status.has("battery") && status.getNumber("battery").doubleValue() > 0) {
-                logger.trace("Recieved battery level of {}",status.getNumber("battery").doubleValue() );
-                batteryProperty.setValue(status.getNumber("battery").doubleValue() / 100.0);
+            if (battery > 0) {
+                logger.trace("Recieved battery level of {}",battery);
+                batteryProperty.setValue(battery / 100.0);
             } else batteryProperty.setValue(-1);
-            
+
             logger.trace("Battery Level: {} set to {}",readerNameProperty.getValue(),batteryProperty.getValue());
 
             // Reading
-            readingProperty.setValue(status.getBoolean("reading"));
+            if (hasReading) readingProperty.setValue(reading);
 
             // Reader Profile
             // {"profile":{"id":"finish_mats","name":"Finish Mats"}}
-            JSONObject profile = status.optJSONObject("profile");
             if (profile != null) {
                 String id = profile.optString("id");
                 String name = profile.optString("name", id);
@@ -296,37 +347,47 @@ public class LocalReader implements Reader {
         
     }
 
-    private void processRead(JSONObject tagRead, Boolean rewind) {
+    // Returns true if the read was queued for output
+    private boolean processRead(JSONObject tagRead, boolean rewind) {
         //  {"antenna":3,"chip":"23210006","rssi":-71,"reader":1,"tz":"-07:00","epochMilli":1703796324476,"type":"READ","timestamp":"2023-12-28 13:45:24.476"}
         logger.trace("Chip Read for {}: {}", readerNameProperty.getValueSafe(),tagRead);
-        
-        
 
         // Extract the data
-        String chip = tagRead.getString("chip");
+        String chip = tagRead.optString("chip", "");
+        Number epochMilliNumber = tagRead.optNumber("epochMilli");
+        if (chip.isBlank() || epochMilliNumber == null) {
+            logger.debug("Skipping a read without a chip or epochMilli from {}: {}", readerNameProperty.getValueSafe(), tagRead);
+            return false;
+        }
+        Long epochMilli = epochMilliNumber.longValue();
         Integer reader = tagRead.optInt("reader");
         Integer port = tagRead.optInt("antenna");
-        Long epochMilli = tagRead.getLong("epochMilli");
-        String dateTime = tagRead.getString("timestamp");
-        String tz = tagRead.optString("tz");
+        String dateTime = tagRead.optString("timestamp", "");
+        String tz = tagRead.optString("tz", "");
         Double rssi = tagRead.optDouble("rssi");
-        
+
         // create the read record
         // Reader reader, String chip, Long epochMilli, String dateTime, Integer antenna, Integer rfidReader
         Read read = new Read(this,chip,epochMilli, tz, dateTime, port, reader, rssi);
-        
-        if(! rewind && processedReads.contains(read)){ 
-            return;
-        } 
 
-        outputProcessorQueue.add(read);
-        
+        if(! rewind && processedReads.contains(read)){
+            return false;
+        }
+
+        // put() waits if the queue is full (e.g. a large rewind) rather than throwing
+        try {
+            outputProcessorQueue.put(read);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            logger.warn("Interrupted while queueing a read from {}", readerNameProperty.getValueSafe());
+            return false;
+        }
+
         lastRead = read;
-        
-        
+
         // If we don't already have it (possible with rewinds), add it
-        if (!processedReads.contains(read)) processedReads.add(read);
-        
+        processedReads.add(read);
+        return true;
     }
 
 //    @Override
@@ -368,7 +429,9 @@ public class LocalReader implements Reader {
     
     public void disable(){
         enabledProperty.set(false);
-        webSocketClient.close();
+        // The client is created by the connection thread, so it may not exist yet
+        EventWebSocketClient client = webSocketClient;
+        if (client != null) client.close();
         if (timeline != null) timeline.stop();
         lastUpdatedProperty.set(99);
         connectedProperty.set(false);
@@ -398,29 +461,57 @@ public class LocalReader implements Reader {
         lastReadProperty.set("");
     }
     
-    public void startReader(){
-        HttpClient client = HttpClient.newHttpClient();
-        
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("http://" + readerIPProperty.getValueSafe() + ":" + readerPortProperty.getValueSafe() + "/start" ))
-                .GET()
-                .build();
-                
-        // sendAsync executes non-blocking and 
-        // returns a CompletableFuture that we don't care about ;-) 
-        client.sendAsync(request, HttpResponse.BodyHandlers.ofString());
+    // Completes exceptionally (with the reader's error message) if the
+    // reader can't be reached or rejects the command
+    public CompletableFuture<HttpResponse<String>> startReader(){
+        return sendCommand("/start");
     }
-    
-    public void stopReader(){
-        HttpClient client = HttpClient.newHttpClient();
-        
+
+    public CompletableFuture<HttpResponse<String>> stopReader(){
+        return sendCommand("/stop");
+    }
+
+    private CompletableFuture<HttpResponse<String>> sendCommand(String command) {
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("http://" + readerIPProperty.getValueSafe() + ":" + readerPortProperty.getValueSafe() + "/stop" ))
+                .uri(URI.create(baseURL() + command))
+                .timeout(Duration.ofSeconds(10))
                 .GET()
                 .build();
-                
-        // sendAsync executes non-blocking and returns a CompletableFuture
-        client.sendAsync(request, HttpResponse.BodyHandlers.ofString());
+        logger.debug("Sending {} to {}", command, readerNameProperty.getValueSafe());
+        return httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+            .thenApply(response -> {
+                if (response.statusCode() < 200 || response.statusCode() > 299) {
+                    throw new RuntimeException(responseError(response));
+                }
+                return response;
+            });
+    }
+
+    private String baseURL() {
+        return "http://" + readerIPProperty.getValueSafe() + ":" + readerPortProperty.getValueSafe();
+    }
+
+    // The "error" from a PikaReader error response, or the HTTP status code
+    private static String responseError(HttpResponse<String> response) {
+        try {
+            return new JSONObject(response.body()).optString("error", "HTTP " + response.statusCode());
+        } catch (JSONException ex) {
+            return "HTTP " + response.statusCode();
+        }
+    }
+
+    /**
+     * @param ex an exception from a CompletableFuture (possibly wrapped)
+     * @return a message suitable for showing to the user
+     */
+    public static String errorMessage(Throwable ex) {
+        Throwable cause = ex;
+        while ((cause instanceof CompletionException || cause instanceof ExecutionException) && cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        if (cause instanceof HttpTimeoutException) return "The reader did not respond in time";
+        if (cause instanceof ConnectException) return "Unable to connect to the reader";
+        return cause.getMessage() != null ? cause.getMessage() : cause.toString();
     }
 
     public BooleanProperty getProfileSupportedProperty(){
@@ -446,7 +537,7 @@ public class LocalReader implements Reader {
         if (!profilesLoading.compareAndSet(false, true)) return;
 
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("http://" + readerIPProperty.getValueSafe() + ":" + readerPortProperty.getValueSafe() + "/profiles" ))
+                .uri(URI.create(baseURL() + "/profiles"))
                 .timeout(Duration.ofSeconds(10))
                 .GET()
                 .build();
@@ -487,7 +578,7 @@ public class LocalReader implements Reader {
     // the reader's error message (e.g. 409 if the reader is reading).
     public CompletableFuture<JSONObject> changeProfile(String id){
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("http://" + readerIPProperty.getValueSafe() + ":" + readerPortProperty.getValueSafe() + "/profile/"
+                .uri(URI.create(baseURL() + "/profile/"
                         + URLEncoder.encode(id, StandardCharsets.UTF_8).replace("+", "%20")))
                 .timeout(Duration.ofSeconds(45)) // The reader can take up to 30 seconds to apply the profile
                 .PUT(HttpRequest.BodyPublishers.noBody())
@@ -519,8 +610,17 @@ public class LocalReader implements Reader {
     }
     
     public void rewind() {
-        // open a dialog box 
-        Dialog<RewindData> dialog = new Dialog();
+        if (!connectedProperty.get()) {
+            Alert alert = new Alert(AlertType.INFORMATION);
+            alert.setTitle("Rewind");
+            alert.setHeaderText("Reader is not connected");
+            alert.setContentText(readerNameProperty.getValueSafe() + " is not connected.\nRewind will be available once the reader reconnects.");
+            alert.showAndWait();
+            return;
+        }
+
+        // open a dialog box
+        Dialog<RewindRange> dialog = new Dialog<>();
         dialog.setTitle("Rewind");
         dialog.setHeaderText("Rewind timing data...");
         ButtonType rewindButtonType = new ButtonType("Rewind", ButtonBar.ButtonData.OK_DONE);
@@ -554,50 +654,24 @@ public class LocalReader implements Reader {
         BooleanProperty endTimeOK = new SimpleBooleanProperty(false);
         BooleanProperty allOK = new SimpleBooleanProperty(false);
 
-        allOK.bind(Bindings.and(endTimeOK, startTimeOK));
+        installTimeFilter(startTime, startTimeOK);
+        installTimeFilter(endTime, endTimeOK);
 
-        startTime.textProperty().addListener((observable, oldValue, newValue) -> {
-            startTimeOK.setValue(false);
-            if (DurationParser.parsable(newValue)) {
-                startTimeOK.setValue(Boolean.TRUE);
+        // Both times valid, both dates set, and from is not after to
+        Runnable validate = () -> {
+            boolean ok = startTimeOK.get() && endTimeOK.get()
+                    && startDate.getValue() != null && endDate.getValue() != null;
+            if (ok) {
+                LocalDateTime from = toDateTime(startDate.getValue(), startTime.getText());
+                LocalDateTime to = toDateTime(endDate.getValue(), endTime.getText());
+                ok = !from.isAfter(to);
             }
-            if (newValue.isEmpty() || newValue.matches("^[0-9]*(:?([0-5]?([0-9]?(:([0-5]?([0-9]?)?)?)?)?)?)?")) {
-                logger.debug("Possiblely good start Time (newValue: " + newValue + ")");
-            } else {
-                Platform.runLater(() -> {
-                    int c = startTime.getCaretPosition();
-                    if (oldValue.length() > newValue.length()) {
-                        c++;
-                    } else {
-                        c--;
-                    }
-                    startTime.setText(oldValue);
-                    startTime.positionCaret(c);
-                });
-                logger.debug("Bad start time (newValue: " + newValue + ")");
-            }
-        });
-        endTime.textProperty().addListener((observable, oldValue, newValue) -> {
-            endTimeOK.setValue(false);
-            if (DurationParser.parsable(newValue)) {
-                endTimeOK.setValue(Boolean.TRUE);
-            }
-            if (newValue.isEmpty() || newValue.matches("^[0-9]*(:?([0-5]?([0-9]?(:([0-5]?([0-9]?)?)?)?)?)?)?")) {
-                logger.debug("Possiblely good start Time (newValue: " + newValue + ")");
-            } else {
-                Platform.runLater(() -> {
-                    int c = endTime.getCaretPosition();
-                    if (oldValue.length() > newValue.length()) {
-                        c++;
-                    } else {
-                        c--;
-                    }
-                    endTime.setText(oldValue);
-                    endTime.positionCaret(c);
-                });
-                logger.debug("Bad end time (newValue: " + newValue + ")");
-            }
-        });
+            allOK.set(ok);
+        };
+        startTime.textProperty().addListener(o -> validate.run());
+        endTime.textProperty().addListener(o -> validate.run());
+        startDate.valueProperty().addListener(o -> validate.run());
+        endDate.valueProperty().addListener(o -> validate.run());
 
         //Default to event date / 00:00 for the start time, event date 23:59:00 for the end time
         startDate.setValue(LocalDate.now());
@@ -610,77 +684,99 @@ public class LocalReader implements Reader {
 
         dialog.setResultConverter(dialogButton -> {
             if (dialogButton == rewindButtonType) {
-                RewindData result = new RewindData();
-                result.startDate = startDate.getValue();
-                result.startTime = DurationParser.parse(startTime.getText());
-                result.endDate = endDate.getValue();
-                result.endTime = DurationParser.parse(endTime.getText());
-                return result;
+                return new RewindRange(
+                        toDateTime(startDate.getValue(), startTime.getText()),
+                        toDateTime(endDate.getValue(), endTime.getText()));
             }
             return null;
         });
 
-        Optional<RewindData> result = dialog.showAndWait();
+        Optional<RewindRange> result = dialog.showAndWait();
+        if (result.isEmpty()) return;
 
-        if (result.isPresent()) {
-            RewindData rwd= result.get();
+        RewindRange range = result.get();
+        String readerName = readerNameProperty.getValueSafe();
+        String from = range.from().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+        String to = range.to().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+        logger.info("Rewind {} from {} to {}", readerName, from, to);
 
-            LocalDateTime from = LocalDateTime.of(rwd.startDate, LocalTime.ofSecondOfDay(rwd.startTime.getSeconds()));
-            LocalDateTime to = LocalDateTime.of(rwd.endDate, LocalTime.ofSecondOfDay(rwd.endTime.getSeconds()));
-            logger.debug("Rewind from " + from.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) + " to " + to.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
-            // issue the rewind command via a background thread
-            
-            Task pikaCommand = new Task<Void>() {
-                @Override public Void call() {
-                    if (connectedProperty.get()) {
-                        try {
-                            URL url = new URL("http://" + readerIPProperty.getValueSafe() + ":" + readerPortProperty.getValueSafe() + "/rewind" + 
-                                    "/" + from.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) + 
-                                    "/" + to.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)); 
-                            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                            conn.setRequestMethod("GET");
-                            //conn.setRequestProperty("Accept", "application/json");
-                            if (conn.getResponseCode() != 200) {
-                                throw new RuntimeException("Failed : HTTP Error code : "
-                                        + conn.getResponseCode());
-                            }
-                            InputStreamReader in = new InputStreamReader(conn.getInputStream(),"UTF-8");
-                            BufferedReader br = new BufferedReader(in);
-                            String output;
-                            String fullResponse="";
-                            while ((output = br.readLine()) != null) {
-                                logger.trace(output);
-                                fullResponse +=output;
-                            }
-                            conn.disconnect();
-                            JSONArray rewinds = new JSONArray(fullResponse);
-                            rewinds.forEach(item -> {
-                                JSONObject obj = (JSONObject) item;
-                                processRead(obj, true);
-                            });
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(baseURL() + "/rewind/" + from + "/" + to))
+                .timeout(Duration.ofSeconds(120)) // A full day can be a lot of reads
+                .GET()
+                .build();
 
-                        } catch(Exception ex){
-                            logger.debug("Exception in PikaReaderDirect::StartReading() ");
-                            ex.printStackTrace(System.out);
-                        }
-                        
-                    }
-                    return null;
+        // Fetch and process the reads in the background, then report back
+        httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+            .thenApply(response -> {
+                if (response.statusCode() < 200 || response.statusCode() > 299) {
+                    throw new RuntimeException(responseError(response));
                 }
-            };
-            new Thread(pikaCommand).start();
-         }
+                JSONArray rewinds = new JSONArray(response.body());
+                int queued = 0;
+                int skipped = 0;
+                for (int i = 0; i < rewinds.length(); i++) {
+                    try {
+                        JSONObject obj = rewinds.optJSONObject(i);
+                        if (obj != null && processRead(obj, true)) queued++;
+                        else skipped++;
+                    } catch (RuntimeException ex) {
+                        skipped++;
+                        logger.debug("Skipping a bad rewind read from {}: {}", readerName, ex.getMessage());
+                    }
+                }
+                logger.info("Rewind {}: {} reads queued, {} skipped", readerName, queued, skipped);
+                return new int[]{queued, skipped};
+            })
+            .whenComplete((counts, ex) -> Platform.runLater(() -> {
+                if (ex != null) {
+                    logger.error("Rewind of {} failed: {}", readerName, errorMessage(ex));
+                    Alert alert = new Alert(AlertType.ERROR);
+                    alert.setTitle("Rewind");
+                    alert.setHeaderText("Unable to rewind " + readerName);
+                    alert.setContentText(errorMessage(ex));
+                    alert.show();
+                } else {
+                    Alert alert = new Alert(AlertType.INFORMATION);
+                    alert.setTitle("Rewind");
+                    alert.setHeaderText("Rewind of " + readerName + " complete");
+                    String msg = "Rewound " + counts[0] + " reads.";
+                    if (counts[1] > 0) msg += "\n" + counts[1] + " reads could not be read and were skipped.";
+                    alert.setContentText(msg);
+                    alert.show();
+                }
+            }));
     }
-    
-    private class EventWebSocketClient extends WebSocketClient {
-        private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
-            Thread thread = new Thread(runnable);
-            thread.setDaemon(true); // <-- This is the key line
-            thread.setName("ws-reconnect-thread"); // Optional: Helps with debugging
-            return thread;
+
+    // Date + time of day (a duration from midnight, so 24:00:00 rolls over to the next day)
+    private static LocalDateTime toDateTime(LocalDate date, String time) {
+        return date.atStartOfDay().plus(DurationParser.parse(time));
+    }
+
+    // Only allow time-like input (HH:MM:SS.sss) in the field, and track if it is a valid time
+    private static void installTimeFilter(TextField timeField, BooleanProperty timeOK) {
+        timeField.textProperty().addListener((observable, oldValue, newValue) -> {
+            timeOK.setValue(DurationParser.parsable(newValue));
+            if (newValue.isEmpty() || newValue.matches("^[0-9]*(:?([0-5]?([0-9]?(:([0-5]?([0-9]?)?)?)?)?)?)?")) {
+                logger.trace("Possiblely good time (newValue: {})", newValue);
+            } else {
+                Platform.runLater(() -> {
+                    int c = timeField.getCaretPosition();
+                    if (oldValue.length() > newValue.length()) {
+                        c++;
+                    } else {
+                        c--;
+                    }
+                    timeField.setText(oldValue);
+                    timeField.positionCaret(c);
+                });
+                logger.trace("Bad time (newValue: {})", newValue);
+            }
         });
+    }
+
+    private class EventWebSocketClient extends WebSocketClient {
         private Integer messageCounter = 0;
-        private String wsURI;
         LocalReader reader;
 
         public EventWebSocketClient(URI serverURI) {
@@ -694,37 +790,29 @@ public class LocalReader implements Reader {
 
         @Override
         public void onOpen(ServerHandshake handshakedata) {
-            logger.debug("new connection opened");
+            logger.debug("Connection to {} opened", reader.getReaderNameProperty().getValueSafe());
         }
 
         @Override
         public void onClose(int code, String reason, boolean remote) {
-            logger.error("Reader {} closed with exit code {}: {}",reader.getReaderNameProperty().getValue(), code, reason);
-            
+            logger.warn("Reader {} closed with exit code {}: {}",reader.getReaderNameProperty().getValueSafe(), code, reason);
+
             if (enabledProperty.get()) {
-                // OFF-THREAD RECONNECT:
-                // Schedule a reconnection task in the background after 5 seconds
-                scheduler.schedule(() -> {
-                    System.out.println("Attempting to reconnect...");
-                    if (timeline != null) timeline.stop();
+                // Reconnect in 5 seconds. The shared scheduler just waits,
+                // the actual work is done on the FX thread (UI-bound properties).
+                RECONNECT.schedule(() -> Platform.runLater(() -> {
+                    if (!enabledProperty.get()) return; // Disconnected in the mean time
+                    logger.debug("Attempting to reconnect to {}", reader.getReaderNameProperty().getValueSafe());
                     lastUpdatedProperty.set(99);
                     connectedProperty.set(false);
                     reader.connect();
-//                    try {
-//                        // reconnectBlocking() is safe here because it runs on the executor thread
-//                        this.reconnectBlocking(); 
-//                        connectedProperty.set(true);
-//                    } catch (InterruptedException e) {
-//                        Thread.currentThread().interrupt();
-//                        System.err.println("Reconnection was interrupted.");
-//                    }
-                }, 5, TimeUnit.SECONDS); 
+                }), 5, TimeUnit.SECONDS);
             }
         }
 
         @Override
         public void onMessage(String message) {
-            logger.trace("Received message #" + messageCounter++ + ": " + message + " Thread: " + Thread.currentThread().getName());
+            logger.trace("Received message #{}: {} Thread: {}", messageCounter++, message, Thread.currentThread().getName());
             reader.processLine(message);
         }
 
@@ -735,19 +823,10 @@ public class LocalReader implements Reader {
 
         @Override
         public void onError(Exception ex) {
-            System.err.println("an error occurred:" + ex);
+            logger.warn("Websocket error for {}: {}", reader.getReaderNameProperty().getValueSafe(), ex.toString());
         }
 
     }
-    
-    private static class RewindData {
 
-        public LocalDate startDate;
-        public LocalDate endDate;
-        public Duration startTime;
-        public Duration endTime;
-
-        public RewindData() {
-        }
-    }
+    private record RewindRange(LocalDateTime from, LocalDateTime to) {}
 }

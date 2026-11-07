@@ -60,7 +60,7 @@ public class Downloader extends Application {
             //primaryStage.getIcons().add(new Image("icons/PikaDownloader_"+s+"x"+s+".ico"));
             primaryStage.getIcons().add(new Image("icons/PikaDownloader_"+s+"x"+s+".png"));
         }
-        primaryStage.getIcons().add(new Image("icons/PikaDownloader.ico"));
+        // Note: JavaFX can't decode .ico files, so only the PNGs are used here
         // Total hack and a half to set the dock icon in MacOS
         // From https://runmodule.com/2020/01/05/how-to-set-dock-icon-of-java-application/ 
         if (SystemUtils.IS_OS_MAC) {
@@ -103,6 +103,13 @@ public class Downloader extends Application {
         primaryStage.show();
         
         
+    }
+
+    @Override
+    public void stop() {
+        // Write out any queued reads and close the output files
+        logger.info("Shutting down");
+        OutputProcessor.INSTANCE.shutdown();
     }
 
     public static void main(String[] args) {
