@@ -31,7 +31,8 @@ import java.util.Map;
  * - a header whose first column contains "bib": bib,chip
  * - anything else: no header, the file is bib,chip
  *
- * Values are trimmed and surrounding quotes are removed. Lines with fewer
+ * Values are trimmed and surrounding quotes are removed, and leading zeroes
+ * are removed from chip numbers (see {@link Chips#normalize}). Lines with fewer
  * than two values (or an empty bib or chip) are skipped and reported. Extra
  * columns are ignored. If a chip is listed more than once, the last one wins.
  *
@@ -91,7 +92,7 @@ public final class BibChipFileParser {
                 skipped.add("Line " + lineNumber + ": " + line);
                 continue;
             }
-            chipToBib.put(chip, bib);
+            chipToBib.put(Chips.normalize(chip), bib);
         }
 
         if (firstLine) {

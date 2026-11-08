@@ -6,7 +6,8 @@ Permits downloading timing data from a [PikaReader](https://github.com/PikaTimer
 * Connects to one or more local PikaReader systems. 
 * Allows for saving both live read data and rewinds from a PikaReader to a local text file.
 * Pre-select output format from various pre-defined basic "Chip, Date, Time" CSV file formats or use a custom output format.
-* Provides a Chip -> Bib mapping function to allow for reporting a Bib number in place of the raw chip number.
+* Provides a Chip -> Bib mapping function to allow for reporting a Bib number in place of the raw chip number. Leading zeroes on chip numbers are ignored when matching. If the output includes a Bib but no Chip -> Bib map is in use, the chip number is written in its place and the Output Settings pane shows a warning.
+* Optionally only outputs reads for chips that are in the Chip -> Bib map. Trigger reads (chip `0`) are always output.
 * Appends new data in realtime to the output file to enable continuous importing into a timing application.
 * Displays the status of the PikaReader system (last read, battery level if available, etc).
 

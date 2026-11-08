@@ -90,7 +90,8 @@ import org.json.JSONException;
 public class LocalReader implements Reader {
     final Preferences prefs = PikaDownloaderPrefs.INSTANCE.getPreferences();
 
-    // Every read seen this session (kept for a future read review / search feature).
+    // Every read seen this session, used to skip duplicates. Each new read
+    // is also added to ReadLog (in arrival order) for the Read Review window.
     // Written by the websocket and rewind threads, read by the FX thread.
     final Set<Read> processedReads = ConcurrentHashMap.newKeySet();
 
@@ -115,7 +116,11 @@ public class LocalReader implements Reader {
     private BooleanProperty connectedProperty = new SimpleBooleanProperty(false);
     private StringProperty statusLabel = new SimpleStringProperty();
     private DoubleProperty batteryProperty = new SimpleDoubleProperty(-2);
-    
+
+    // RFID readers on the unit that report they are not connected
+    // (e.g. "Reader 1 not connected"), or "" if they are all fine
+    private final StringProperty rfidReaderProblemProperty = new SimpleStringProperty("");
+
     private StringProperty readerNameProperty = new SimpleStringProperty();
     
     
@@ -304,6 +309,7 @@ public class LocalReader implements Reader {
         boolean hasReading = status.has("reading");
         boolean reading = status.optBoolean("reading", false);
         JSONObject profile = status.optJSONObject("profile");
+        String rfidProblem = rfidReaderProblem(status.optJSONArray("readers"));
 
         Platform.runLater(() -> {
 
@@ -320,6 +326,9 @@ public class LocalReader implements Reader {
 
             // Reading
             if (hasReading) readingProperty.setValue(reading);
+
+            // RFID Readers
+            rfidReaderProblemProperty.setValue(rfidProblem);
 
             // Reader Profile
             // {"profile":{"id":"finish_mats","name":"Finish Mats"}}
@@ -344,7 +353,23 @@ public class LocalReader implements Reader {
         
         // Last Updated TS
         lastUpdated = LocalDateTime.now();
-        
+
+    }
+
+    // {"readers":[{"id":1,"name":"Reader 1","connected":true,...},...]}
+    // Returns "Reader 1 not connected" (or "Reader 1, Reader 2 not connected"),
+    // or "" if every RFID reader is connected or the unit didn't list them.
+    // A reader without a "connected" flag is assumed to be fine.
+    static String rfidReaderProblem(JSONArray readers) {
+        if (readers == null) return "";
+        List<String> down = new ArrayList<>();
+        for (int i = 0; i < readers.length(); i++) {
+            JSONObject r = readers.optJSONObject(i);
+            if (r == null || r.optBoolean("connected", true)) continue;
+            down.add(r.optString("name", "Reader " + r.optString("id", "?")));
+        }
+        if (down.isEmpty()) return "";
+        return String.join(", ", down) + " not connected";
     }
 
     // Returns true if the read was queued for output
@@ -385,8 +410,9 @@ public class LocalReader implements Reader {
 
         lastRead = read;
 
-        // If we don't already have it (possible with rewinds), add it
-        processedReads.add(read);
+        // If we don't already have it (possible with rewinds), add it.
+        // New reads also go to the session read log (Read Review window).
+        if (processedReads.add(read)) ReadLog.INSTANCE.add(read);
         return true;
     }
 
@@ -407,7 +433,11 @@ public class LocalReader implements Reader {
     public DoubleProperty getBatteryProperty(){
         return batteryProperty;
     }
-    
+
+    public StringProperty getRFIDReaderProblemProperty(){
+        return rfidReaderProblemProperty;
+    }
+
     public StringProperty getLastReadProperty(){
         return lastReadProperty;
     }

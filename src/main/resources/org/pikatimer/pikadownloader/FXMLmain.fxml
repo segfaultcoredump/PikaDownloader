@@ -32,13 +32,13 @@
          <children>
             <Button fx:id="addLocalButton" mnemonicParsing="false" text="Add Local Reader..." />
             <Pane maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
-            <Button fx:id="reviewReadsButton" mnemonicParsing="false" text="Review Reads..." visible="false" />
+            <Button fx:id="reviewReadsButton" mnemonicParsing="false" text="Review Reads..." />
          </children>
          <padding>
             <Insets bottom="2.0" left="2.0" right="2.0" top="2.0" />
          </padding>
       </HBox>
-    <TitledPane animated="false" text="Output Settings" VBox.vgrow="NEVER">
+    <TitledPane fx:id="outputSettingsTitledPane" animated="false" text="Output Settings" VBox.vgrow="NEVER">
          <content>
             <VBox spacing="4.0">
                <children>
@@ -78,6 +78,17 @@
                         <Insets top="4.0" />
                      </VBox.margin>
                   </HBox>
+                  <HBox alignment="CENTER_LEFT" maxWidth="1.7976931348623157E308">
+                     <children>
+                        <Pane maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
+                        <ToggleSwitch fx:id="mappedChipsOnlyToggleSwitch" minWidth="-Infinity" prefHeight="24.0" text="Only Output Mapped Chips" />
+                     </children>
+                  </HBox>
+                  <Label fx:id="bibWarningLabel" managed="false" maxWidth="1.7976931348623157E308" minHeight="-Infinity" prefWidth="0.0" styleClass="warning-label" text="The output format includes the bib, but no Chip -&gt; Bib map is in use. The chip number will be written in place of the bib." visible="false" wrapText="true">
+                     <VBox.margin>
+                        <Insets top="4.0" />
+                     </VBox.margin>
+                  </Label>
                </children>
             </VBox>
          </content>

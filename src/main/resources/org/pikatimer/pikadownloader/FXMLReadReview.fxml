@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Pane?>
+<?import javafx.scene.layout.VBox?>
+<?import org.controlsfx.control.CheckComboBox?>
+
+<VBox maxHeight="1.7976931348623157E308" maxWidth="1.7976931348623157E308" spacing="5.0" stylesheets="@PikaDownloader.css" xmlns="http://javafx.com/javafx/23" xmlns:fx="http://javafx.com/fxml/1" fx:controller="org.pikatimer.pikadownloader.FXMLReadReviewController">
+   <children>
+      <HBox alignment="CENTER_LEFT" spacing="5.0" VBox.vgrow="NEVER">
+         <children>
+            <Label minWidth="-Infinity" text="Search" />
+            <TextField fx:id="searchTextField" prefWidth="150.0" promptText="Regex search" HBox.hgrow="SOMETIMES" />
+            <CheckComboBox fx:id="readerCheckComboBox" minWidth="-Infinity" prefWidth="140.0" />
+            <Pane maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
+            <Label fx:id="countLabel" minWidth="-Infinity" text="0 / 0" />
+         </children>
+      </HBox>
+      <!-- fixedCellSize: ~10 rows at the default height, and faster scrolling with a lot of reads -->
+      <TableView fx:id="readTableView" fixedCellSize="24.0" maxHeight="1.7976931348623157E308" maxWidth="1.7976931348623157E308" prefHeight="290.0" prefWidth="460.0" VBox.vgrow="ALWAYS">
+         <columns>
+            <TableColumn fx:id="readerColumn" editable="false" prefWidth="120.0" text="Reader" />
+            <TableColumn fx:id="chipColumn" editable="false" prefWidth="120.0" style="-fx-alignment: CENTER-RIGHT;" text="Chip" />
+            <TableColumn fx:id="bibColumn" editable="false" prefWidth="80.0" style="-fx-alignment: CENTER-RIGHT;" text="Bib" />
+            <TableColumn fx:id="timeColumn" editable="false" prefWidth="110.0" style="-fx-alignment: CENTER-RIGHT;" text="Time" />
+         </columns>
+         <columnResizePolicy>
+            <TableView fx:constant="CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN" />
+         </columnResizePolicy>
+      </TableView>
+   </children>
+   <padding>
+      <Insets bottom="5.0" left="5.0" right="5.0" top="5.0" />
+   </padding>
+</VBox>

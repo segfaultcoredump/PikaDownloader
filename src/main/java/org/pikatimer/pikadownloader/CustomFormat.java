@@ -26,6 +26,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+import java.util.function.UnaryOperator;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -55,27 +56,35 @@ public final class CustomFormat {
     // ZoneId.of() re-parses the offset every time, so cache them
     private static final Map<String, ZoneId> ZONE_CACHE = new ConcurrentHashMap<>();
 
-    private record Segment(String header, Function<Read, String> renderer) {}
+    // bib: true for the Bib token, so we can tell if the format outputs a bib
+    private record Segment(String header, Function<Read, String> renderer, boolean bib) {
+        Segment(String header, Function<Read, String> renderer) {
+            this(header, renderer, false);
+        }
+    }
 
     private final List<Segment> segments;
     private final String header;
+    private final boolean usesBib;
 
     private CustomFormat(List<Segment> segments) {
         this.segments = List.copyOf(segments);
         StringBuilder sb = new StringBuilder();
         this.segments.forEach(s -> sb.append(s.header()));
         this.header = sb.toString();
+        this.usesBib = this.segments.stream().anyMatch(Segment::bib);
     }
 
     /**
      * Compile a custom format string.
      *
      * @param format the custom format (may be null or blank)
-     * @param bibChipMap the chip -> bib map used by the Bib token. The map is
-     * read when each read is rendered, so later changes to it are picked up.
+     * @param bibLookup returns the bib for a chip number, used by the Bib
+     * token. It is called when each read is rendered, so later changes to the
+     * chip -> bib map are picked up.
      * @return the compiled format
      */
-    public static CustomFormat compile(String format, Map<String, String> bibChipMap) {
+    public static CustomFormat compile(String format, UnaryOperator<String> bibLookup) {
         List<Segment> segments = new ArrayList<>();
         if (format == null || format.isBlank()) {
             return new CustomFormat(segments);
@@ -104,7 +113,7 @@ public final class CustomFormat {
                 tokenName = matcher.group(3).toLowerCase(Locale.ROOT);
                 parameter = matcher.group(4);
             }
-            segments.add(token(tokenName, parameter, matcher.group(), bibChipMap));
+            segments.add(token(tokenName, parameter, matcher.group(), bibLookup));
         }
         if (last < format.length()) {
             segments.add(literal(format.substring(last)));
@@ -117,6 +126,13 @@ public final class CustomFormat {
      */
     public String header() {
         return header;
+    }
+
+    /**
+     * @return true if the format includes the Bib token
+     */
+    public boolean usesBib() {
+        return usesBib;
     }
 
     /**
@@ -135,10 +151,10 @@ public final class CustomFormat {
         return new Segment(text, r -> text);
     }
 
-    private static Segment token(String tokenName, String parameter, String original, Map<String, String> bibChipMap) {
+    private static Segment token(String tokenName, String parameter, String original, UnaryOperator<String> bibLookup) {
         return switch (tokenName) {
             case "b", "bib" ->
-                new Segment("Bib", r -> bibChipMap.getOrDefault(r.chip(), r.chip()));
+                new Segment("Bib", r -> bibLookup.apply(r.chip()), true);
             case "c", "chip" ->
                 new Segment("Chip", Read::chip);
             case "a", "antenna" ->

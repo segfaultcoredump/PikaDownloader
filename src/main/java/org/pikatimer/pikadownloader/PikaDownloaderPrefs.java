@@ -41,6 +41,21 @@ public enum PikaDownloaderPrefs {
         return new File(System.getProperty("user.home"));
     }
 
+    /**
+     * Uses the same checks as OutputProcessor before it writes any reads.
+     * This does file I/O, which can block on a dead network share, so call
+     * it off the FX thread unless the directory was just picked.
+     *
+     * @param dir the output directory (may be null)
+     * @return why reads can't be saved to the directory, or null if it is OK
+     */
+    public static String outputDirProblem(File dir) {
+        if (dir == null) return "No output directory set";
+        if (!dir.isDirectory()) return "Output directory not found";
+        if (!dir.canWrite()) return "Output directory is not writable";
+        return null;
+    }
+
     public File getOutputDir(){
         return outputDir;
     }

@@ -26,6 +26,7 @@ import javafx.application.HostServices;
 import javafx.application.Platform;
 import javafx.beans.binding.BooleanBinding;
 import javafx.beans.binding.Bindings;
+import javafx.beans.binding.StringBinding;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.collections.FXCollections;
@@ -38,6 +39,7 @@ import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.ChoiceBox;
+import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.TextField;
@@ -67,7 +69,16 @@ public class LocalReaderCellController {
 
     // Path separators and characters that are illegal in a file name on any platform
     private static final Pattern INVALID_FILE_NAME_CHARS = Pattern.compile("[/\\\\:*?\"<>|\\p{Cntrl}]");
-    
+
+    // Error state thresholds: no STATUS for this many seconds, or a battery
+    // level (0-1) at or below this
+    private static final int OFFLINE_SECONDS = 10;
+    private static final double LOW_BATTERY = 0.20;
+
+    // Room for the TitledPane's arrow and title padding, so the title
+    // graphic can span the rest of the title bar
+    private static final double TITLE_ARROW_ALLOWANCE = 40;
+
     private static final String errorCSS = """
         /* Custom error style for TitledPane */
             .titled-pane.error-pane > .title {
@@ -112,7 +123,9 @@ public class LocalReaderCellController {
     
     @FXML Label readStatusLabel;
     @FXML Circle readStatusCircle;
-    
+
+    @FXML Label rfidProblemLabel;
+
     @FXML HBox profileHBox;
     @FXML ChoiceBox<ReaderProfile> profileChoiceBox;
 
@@ -154,7 +167,7 @@ public class LocalReaderCellController {
         // Turn the TitlePane red if we have an issue
         errorState.addListener((observable, oldValue, newValue) -> {
             logger.debug("New errorState value for {}: {}",unitNameLabel.textProperty().getValue(),newValue);
-            logger.trace("Error Stats: Battery: {}  Connection: {}",reader.getBatteryProperty().getValue(),reader.getLastUpdatedProperty().getValue());
+            logger.trace("Error Stats: Battery: {}  Connection: {}  RFID: {}",reader.getBatteryProperty().getValue(),reader.getLastUpdatedProperty().getValue(),reader.getRFIDReaderProblemProperty().getValue());
             if (newValue) {
                 if (!titledPane.getStyleClass().contains("error-pane")) {
                     titledPane.getStyleClass().add("error-pane");
@@ -213,22 +226,59 @@ public class LocalReaderCellController {
         });
         
         // Set the titledPane display
+        // Line 1: name and reading status
+        // Line 2 (only while collapsed): why the reader is in an error state,
+        // and the battery level
         HBox titledPaneContent = new HBox();
         Label titledPaneLabel = new Label();
         titledPaneLabel.textProperty().bind(reader.getReaderNameProperty());
-        
+
         Label titledPaneReadingStatusLabel = new Label();
         titledPaneReadingStatusLabel.textProperty().bind(readStatusLabel.textProperty());
-        
+
         Pane titledPaneSpring = new Pane();
         HBox.setHgrow(titledPaneSpring, Priority.ALWAYS);
         titledPaneSpring.setMaxWidth(Double.MAX_VALUE);
-        
+
         titledPaneContent.getChildren().addAll(titledPaneLabel,titledPaneSpring,titledPaneReadingStatusLabel);
-        
         titledPaneContent.setAlignment(Pos.CENTER_LEFT);
-        titledPane.setGraphic(titledPaneContent);
-              
+
+        StringBinding titleStatus = Bindings.createStringBinding(this::titleStatusText,
+                reader.isEnabled(),
+                reader.getLastUpdatedProperty(),
+                reader.getBatteryProperty(),
+                reader.getRFIDReaderProblemProperty());
+        Label titleStatusLabel = new Label();
+        titleStatusLabel.getStyleClass().add("reader-status-label");
+        titleStatusLabel.setMinWidth(0); // truncate rather than widen the window
+        titleStatusLabel.textProperty().bind(titleStatus);
+        BooleanBinding showTitleStatus = titledPane.expandedProperty().not().and(titleStatus.isNotEmpty());
+        titleStatusLabel.visibleProperty().bind(showTitleStatus);
+        titleStatusLabel.managedProperty().bind(showTitleStatus);
+
+        // The TitledPane lays the graphic out at its pref width, so stretch
+        // it across the title bar to let the spring push the reading status
+        // to the right
+        VBox titleVBox = new VBox(titledPaneContent, titleStatusLabel);
+        titleVBox.setMinWidth(0);
+        titleVBox.prefWidthProperty().bind(titledPane.widthProperty().subtract(TITLE_ARROW_ALLOWANCE));
+        // A TitledPane uses its title's preferred width as its minimum width.
+        // The title now follows the pane's own width, so without this the
+        // pane's minimum (and the list cell, see ReaderListCell) would creep
+        // wider on every update whenever the allowance is a bit short (the
+        // arrow and padding scale with the font size)
+        titledPane.setMinWidth(0);
+        titledPane.setGraphic(titleVBox);
+        titledPane.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+
+        // RFID reader problems (only shown while we are hearing from the unit,
+        // otherwise they are stale)
+        BooleanBinding online = reader.isEnabled().and(reader.getLastUpdatedProperty().lessThanOrEqualTo(OFFLINE_SECONDS));
+        BooleanBinding showRFIDProblem = online.and(reader.getRFIDReaderProblemProperty().isNotEmpty());
+        rfidProblemLabel.textProperty().bind(reader.getRFIDReaderProblemProperty());
+        rfidProblemLabel.visibleProperty().bind(showRFIDProblem);
+        rfidProblemLabel.managedProperty().bind(showRFIDProblem);
+
         // Battery Level
         batteryLevelProgressBar.progressProperty().addListener((observable, oldValue, newValue) -> {
             double progress = newValue.doubleValue();
@@ -371,18 +421,47 @@ public class LocalReaderCellController {
         
         removeButton.visibleProperty().bind(reader.isEnabled().not());
 
-        // enter an error state if the battery is below 20 or 
-        // we have not heard from the unit in 10 seconds
+        // enter an error state if the battery is at or below 20%,
+        // we have not heard from the unit in 10 seconds, or one of its
+        // RFID readers is not connected,
         // unless the unit is disabled, then we don't care
+        // (keep in sync with titleStatusText())
         errorState.bind(
             reader.isEnabled().and(
-            reader.getLastUpdatedProperty().greaterThan(10)
+            reader.getLastUpdatedProperty().greaterThan(OFFLINE_SECONDS)
             .or(
                 reader.getBatteryProperty().greaterThanOrEqualTo(0.0)
-                .and(reader.getBatteryProperty().lessThanOrEqualTo(0.20))
-            ))
+                .and(reader.getBatteryProperty().lessThanOrEqualTo(LOW_BATTERY))
+            )
+            .or(reader.getRFIDReaderProblemProperty().isNotEmpty()))
         );
-        
+
+    }
+
+    // The collapsed title's second line: the reasons for an error state
+    // first, then the battery level, e.g. "Disconnected · Low Battery: 15%".
+    // "" hides the line.
+    private String titleStatusText() {
+        // The user disconnected it, not an error
+        if (!reader.isEnabled().get()) return "Manually disconnected";
+
+        List<String> parts = new ArrayList<>();
+        if (reader.getLastUpdatedProperty().get() > OFFLINE_SECONDS) {
+            parts.add("Disconnected");
+        } else {
+            // Only current while we are hearing from the unit
+            String rfidProblem = reader.getRFIDReaderProblemProperty().getValueSafe();
+            if (!rfidProblem.isBlank()) parts.add(rfidProblem);
+        }
+
+        // Below 0: the unit does not report a battery level (or no STATUS yet).
+        // The last known level is kept while disconnected, as a dead
+        // battery is the usual reason.
+        double battery = reader.getBatteryProperty().get();
+        if (battery >= 0) {
+            parts.add((battery <= LOW_BATTERY ? "Low Battery: " : "Battery: ") + Math.round(battery * 100) + "%");
+        }
+        return String.join(" · ", parts);
     }
 
     // Valid: not blank, not . or .., and no path separators or characters

@@ -38,14 +38,14 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.prefs.Preferences;
 import java.util.regex.Pattern;
 import javafx.application.Platform;
@@ -67,9 +67,11 @@ import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.ChoiceBox;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.SelectionMode;
+import javafx.scene.control.TitledPane;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
@@ -110,11 +112,35 @@ public class FXMLmainController {
     
     @FXML    Button setupChipBibButton;
     @FXML    ToggleSwitch customBibMapToggleSwitch;
+    @FXML    ToggleSwitch mappedChipsOnlyToggleSwitch;
     @FXML    Button addLocalButton;
+    @FXML    Button reviewReadsButton;
 
     @FXML    ChoiceBox<OutputFormat> outputFormatChoiceBox;
     @FXML    TextField customFormatTextField;
     @FXML    HBox customFormatHBox;
+
+    @FXML    TitledPane outputSettingsTitledPane;
+    @FXML    Label bibWarningLabel;
+
+    // Second line of the Output Settings title, only shown while collapsed
+    private final Label outputStatusLabel = new Label();
+
+    // The Read Review window, while it is open
+    private Stage readReviewStage = null;
+
+    // Why reads can't be saved to the output directory, or null if it is OK
+    private final StringProperty outputDirProblem = new SimpleStringProperty();
+
+    // Re-checks the output directory, in case it is deleted or its drive is
+    // unplugged after it was picked. Off the FX thread since a dead network
+    // share can block.
+    private static final ScheduledExecutorService OUTPUT_DIR_CHECK = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable);
+        thread.setDaemon(true);
+        thread.setName("output-dir-check");
+        return thread;
+    });
 
     static final ObservableList<Reader> readerList = FXCollections.observableArrayList();
     static final Map<String, Reader> remoteReaderMap = new HashMap();
@@ -130,15 +156,19 @@ public class FXMLmainController {
      * Initializes the controller class.
      */
     public void initialize() {
+        setupOutputSettingsTitle();
+
         // Set the default values from previous runs
         String endpoint = pikaPrefs.getPreferences().get("Endpoint", "");
-        
+
         pikaPrefs.setReaderList(readerList);
 
         addLocalButton.setOnAction(event -> {
             addLocalDialog();
 
         });
+
+        reviewReadsButton.setOnAction(event -> openReadReview());
 
         relayURLTextField.setText(endpoint);
         statusLabel.setText("Disconnected");
@@ -178,27 +208,19 @@ public class FXMLmainController {
         // Add in the CSS rules
         ouputDirTextField.getStylesheets().add("data:text/css," + errorCSS.replaceAll(" ", "%20"));
 
-        // Turn the textfield red if it has an invalid time
-        ouputDirTextField.textProperty().addListener((observable, oldValue, newValue) -> {
-            if (newValue.isBlank()) {
+        // Turn the output dir field (and the Output Settings title) red if
+        // the output directory is not set or is no longer usable
+        outputDirProblem.addListener((observable, oldValue, newValue) -> {
+            if (newValue != null) {
                 if (!ouputDirTextField.getStyleClass().contains("invalid-field")) {
                     ouputDirTextField.getStyleClass().add("invalid-field");
                 }
             } else {
-                Path path = Paths.get(newValue);
-                if (Files.isDirectory(path) && Files.isWritable(path)) {
-                    ouputDirTextField.getStyleClass().remove("invalid-field");
-                } else {
-                    if (!ouputDirTextField.getStyleClass().contains("invalid-field")) {
-                        ouputDirTextField.getStyleClass().add("invalid-field");
-                    }
-                }
+                ouputDirTextField.getStyleClass().remove("invalid-field");
             }
+            updateOutputStatus();
         });
-        
-        // We are blank by default, so flag it
-        ouputDirTextField.getStyleClass().add("invalid-field");
-        
+
 
         readerListView.setCellFactory(param -> new ReaderListCell());
 
@@ -208,8 +230,21 @@ public class FXMLmainController {
                 importBibChipMap();
             }
         });
+        customBibMapToggleSwitch.selectedProperty().addListener((observable, oldValue, newValue) -> {
+            syncBibMapState();
+        });
 
-        
+        // Only output reads for mapped chips (and trigger reads).
+        // Greyed out unless the chip -> bib map is in use.
+        mappedChipsOnlyToggleSwitch.setSelected(OutputProcessor.INSTANCE.isMappedChipsOnly());
+        mappedChipsOnlyToggleSwitch.disableProperty().bind(customBibMapToggleSwitch.selectedProperty().not());
+        mappedChipsOnlyToggleSwitch.selectedProperty().addListener((observable, oldValue, newValue) -> {
+            OutputProcessor.INSTANCE.setMappedChipsOnly(newValue);
+            logger.debug("Only output mapped chips: {}", newValue);
+            updateOutputStatus();
+        });
+
+
         outputFormatChoiceBox.setItems(FXCollections.observableArrayList(OutputFormat.values()));
 
         outputFormatChoiceBox.valueProperty().addListener((observable, oldValue, newValue) -> {
@@ -223,6 +258,7 @@ public class FXMLmainController {
                     customFormatHBox.setVisible(true);
                     customFormatHBox.setManaged(true);
                 }
+                updateBibWarning();
             }
         });
         outputFormatChoiceBox.setValue(OutputProcessor.INSTANCE.getOutputFormat());
@@ -231,7 +267,9 @@ public class FXMLmainController {
         customFormatTextField.textProperty().addListener((observable, oldValue, newValue) -> {
             OutputProcessor.INSTANCE.setCustomFormat(newValue);
             logger.debug("CustomOutputFormat Changed: {} -> {}", oldValue, newValue);
+            updateBibWarning();
         });
+        syncBibMapState();
 
         // Restore the output directory from the last run (if it is still usable)
         // so reads from readers that come back with their output turned on are saved
@@ -245,6 +283,95 @@ public class FXMLmainController {
             } else {
                 logger.warn("The saved output directory {} is no longer available", savedOutputDir);
             }
+        }
+
+        refreshOutputDirStatus();
+        OUTPUT_DIR_CHECK.scheduleWithFixedDelay(this::checkOutputDirInBackground, 5, 5, TimeUnit.SECONDS);
+    }
+
+    // Replace the Output Settings title with a two line graphic: the title,
+    // plus a status line (bib map / filter state, or an output directory
+    // problem) that is only shown while the pane is collapsed
+    private void setupOutputSettingsTitle() {
+        Label titleLabel = new Label(outputSettingsTitledPane.getText());
+        titleLabel.getStyleClass().add("output-title-label");
+        titleLabel.fontProperty().bind(outputSettingsTitledPane.fontProperty());
+
+        outputStatusLabel.getStyleClass().add("output-status-label");
+        outputStatusLabel.setMinWidth(0); // truncate rather than widen the window
+        outputStatusLabel.visibleProperty().bind(outputSettingsTitledPane.expandedProperty().not());
+        outputStatusLabel.managedProperty().bind(outputSettingsTitledPane.expandedProperty().not());
+
+        VBox titleVBox = new VBox(titleLabel, outputStatusLabel);
+        titleVBox.setMinWidth(0);
+        outputSettingsTitledPane.setGraphic(titleVBox);
+        outputSettingsTitledPane.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+    }
+
+    // Check the output directory now. Only call this on the FX thread when the
+    // directory was just set (it does file I/O)
+    private void refreshOutputDirStatus() {
+        outputDirProblem.set(PikaDownloaderPrefs.outputDirProblem(pikaPrefs.getOutputDir()));
+    }
+
+    // Runs on OUTPUT_DIR_CHECK. Any exception would cancel the schedule.
+    private void checkOutputDirInBackground() {
+        try {
+            File dir = pikaPrefs.getOutputDir();
+            String problem = PikaDownloaderPrefs.outputDirProblem(dir);
+            Platform.runLater(() -> {
+                // Skip a stale result if a new directory was picked meanwhile
+                if (dir == pikaPrefs.getOutputDir()) outputDirProblem.set(problem);
+            });
+        } catch (RuntimeException ex) {
+            logger.error("Error checking the output directory", ex);
+        }
+    }
+
+    // Push the "Use Chip -> Bib Map" switch to the OutputProcessor. Reads the
+    // switch itself (not a listener's newValue) since importBibChipMap() can
+    // flip it while its own listener is still running.
+    private void syncBibMapState() {
+        OutputProcessor.INSTANCE.setBibMapEnabled(customBibMapToggleSwitch.isSelected());
+        updateBibWarning();
+        updateOutputStatus();
+    }
+
+    // Show the inline warning when the output includes the bib but no
+    // chip -> bib map is in use, so the chip is written instead
+    private void updateBibWarning() {
+        boolean warn = OutputProcessor.INSTANCE.outputUsesBib() && !isBibMapInUse();
+        bibWarningLabel.setVisible(warn);
+        bibWarningLabel.setManaged(warn);
+    }
+
+    // The map only applies with the switch on and at least one mapping
+    private boolean isBibMapInUse() {
+        return customBibMapToggleSwitch.isSelected()
+                && !OutputProcessor.INSTANCE.getBibChipMap().isEmpty();
+    }
+
+    // Update the collapsed status line, and turn the Output Settings title
+    // red if reads can't be saved. Shows the effective state, matching what
+    // OutputProcessor.writePending() applies.
+    private void updateOutputStatus() {
+        String problem = outputDirProblem.get();
+        if (problem != null) {
+            outputStatusLabel.setText(problem);
+            if (!outputSettingsTitledPane.getStyleClass().contains("error-pane")) {
+                outputSettingsTitledPane.getStyleClass().add("error-pane");
+            }
+            return;
+        }
+        outputSettingsTitledPane.getStyleClass().remove("error-pane");
+
+        if (isBibMapInUse()) {
+            int chips = OutputProcessor.INSTANCE.getBibChipMap().size();
+            boolean filtering = mappedChipsOnlyToggleSwitch.isSelected();
+            outputStatusLabel.setText("Bib Map: On (" + chips + (chips == 1 ? " chip)" : " chips)")
+                    + " · Filter: " + (filtering ? "On" : "Off"));
+        } else {
+            outputStatusLabel.setText("Bib Map: Off · Filter: Off");
         }
     }
 
@@ -706,8 +833,40 @@ public class FXMLmainController {
             logger.debug("Output directory set to {}", selectedDirectory.getAbsolutePath());
             pikaPrefs.setOutputDir(selectedDirectory);
             pikaPrefs.getPreferences().put("outputDir", selectedDirectory.getAbsolutePath());
+            refreshOutputDirStatus();
             // Close the files in the old directory, new reads go to the new one
             OutputProcessor.INSTANCE.requestCloseAll();
+        }
+    }
+
+    // Open the (non-modal) Read Review window, or bring it to the front if
+    // it is already open
+    private void openReadReview() {
+        if (readReviewStage != null) {
+            readReviewStage.setIconified(false);
+            readReviewStage.toFront();
+            return;
+        }
+        try {
+            FXMLLoader fxmlLoader = new FXMLLoader(getClass().getResource("FXMLReadReview.fxml"));
+            Parent root = fxmlLoader.load();
+            FXMLReadReviewController controller = fxmlLoader.getController();
+
+            Stage stage = new Stage();
+            stage.setTitle("Read Review");
+            stage.setScene(new Scene(root));
+            if (reviewReadsButton.getScene().getWindow() instanceof Stage mainStage) {
+                stage.getIcons().setAll(mainStage.getIcons());
+            }
+            stage.setOnHidden(event -> {
+                controller.stop();
+                readReviewStage = null;
+            });
+            readReviewStage = stage;
+            stage.show();
+            controller.start();
+        } catch (IOException ex) {
+            logger.error("Unable to open the Read Review window", ex);
         }
     }
 
@@ -729,6 +888,7 @@ public class FXMLmainController {
             
         if (OutputProcessor.INSTANCE.getBibChipMap().isEmpty()) customBibMapToggleSwitch.setSelected(false); 
         else customBibMapToggleSwitch.setSelected(true); 
+        syncBibMapState(); // the map may have changed even if the switch did not
         
 //        
 //        Map chipMap = OutputProcessor.INSTANCE.getBibChipMap();

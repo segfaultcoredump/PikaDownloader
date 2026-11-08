@@ -83,7 +83,11 @@ public class Downloader extends Application {
         //mainStage.setHeight(400);
         
         primaryStage.setScene(myScene);
-        
+
+        // Closing the main window quits, even if other (non-modal) windows
+        // like the Read Review are still open. Calls stop() below.
+        primaryStage.setOnHidden(event -> Platform.exit());
+
         Platform.runLater(() -> {
         
             Rectangle2D primaryScreenBounds = Screen.getPrimary().getVisualBounds();  

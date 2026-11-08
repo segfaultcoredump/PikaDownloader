@@ -64,3 +64,34 @@
     -fx-focus-color: #FF0000;
     -fx-control-inner-background: #FFF5F5;
 }
+
+/* -------------------------------------------------------------
+   A TitledPane with a problem: a reader cell (which also has an
+   inline copy in LocalReaderCellController) or the Output Settings
+   pane (output directory not set or not usable).
+   ------------------------------------------------------------- */
+.titled-pane.error-pane > .title {
+    -fx-background-color: #ffcccc;      /* Light red background */
+    -fx-border-color: #cc0000;          /* Dark red border */
+    -fx-border-width: 0 0 1 0;          /* Bottom border only */
+}
+.titled-pane.error-pane > .title > .text {
+    -fx-fill: #cc0000;
+}
+.titled-pane.error-pane > .title > .arrow-button > .arrow {
+    -fx-background-color: #cc0000;
+}
+/* The Output Settings and reader titles are graphics (built in
+   FXMLmainController and LocalReaderCellController, GRAPHIC_ONLY), so the
+   .text rule above does not reach them. The reader's status line holds
+   the reason for the error. */
+.titled-pane.error-pane > .title .output-title-label,
+.titled-pane.error-pane > .title .output-status-label,
+.titled-pane.error-pane > .title .reader-status-label {
+    -fx-text-fill: #cc0000;
+}
+
+/* Warning text inside a pane (e.g. the Output Settings bib warning) */
+.label.warning-label {
+    -fx-text-fill: #cc0000;
+}

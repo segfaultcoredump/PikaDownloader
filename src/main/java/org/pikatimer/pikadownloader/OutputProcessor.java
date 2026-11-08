@@ -24,6 +24,7 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -35,11 +36,13 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.prefs.Preferences;
 import javafx.application.Platform;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
+import org.pikatimer.pikadownloader.util.Chips;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -63,13 +66,17 @@ public enum OutputProcessor {
 
     private static final Preferences prefs = PikaDownloaderPrefs.INSTANCE.getPreferences();
 
+    // PikaReader's /trigger endpoint sends a read with a chip of "0"
+    private static final String TRIGGER_CHIP = "0";
+
     private final BlockingQueue<Read> readQueue = new ArrayBlockingQueue<>(100000);
 
     // Open output files, keyed by their absolute path
     private final Map<Path, BufferedWriter> bufferedWriterMap = new ConcurrentHashMap<>();
 
     // chip -> bib. Always the same instance (other classes hold on to it),
-    // updated in place via setBibChipMap()
+    // updated in place via setBibChipMap(). The chip keys are normalized
+    // (no leading zeroes, see Chips.normalize), so look up with bibFor()
     private final Map<String, String> bibChipMap = new ConcurrentHashMap<>();
 
     // Guards the pending batch and all file writes
@@ -84,8 +91,18 @@ public enum OutputProcessor {
     private volatile String customFormat = PikaDownloaderPrefs.INSTANCE.getPreferences().get("CustomOutputFormat", "");
     private volatile CustomFormat compiledFormat;
 
+    // bibMapEnabled mirrors the "Use Chip -> Bib Map" switch (session only,
+    // like the map itself). While it is off, bibs fall back to the chip.
+    // mappedChipsOnly (saved): only write out reads for chips in the
+    // chip -> bib map (and trigger reads) while the map is enabled.
+    private volatile boolean mappedChipsOnly = PikaDownloaderPrefs.INSTANCE.getPreferences().getBoolean("MappedChipsOnly", false);
+    private volatile boolean bibMapEnabled = false;
+
+    // Bumped whenever the bib map or bibMapEnabled changes (see bibMapVersion())
+    private final AtomicInteger bibMapVersion = new AtomicInteger();
+
     private OutputProcessor() {
-        compiledFormat = CustomFormat.compile(customFormat, bibChipMap);
+        compiledFormat = CustomFormat.compile(customFormat, this::bibFor);
         setupReadProcessor();
     }
 
@@ -112,8 +129,77 @@ public enum OutputProcessor {
 
     public void setCustomFormat(String format) {
         customFormat = format;
-        compiledFormat = CustomFormat.compile(format, bibChipMap);
+        compiledFormat = CustomFormat.compile(format, this::bibFor);
         prefs.put("CustomOutputFormat", format);
+    }
+
+    public boolean isMappedChipsOnly() {
+        return mappedChipsOnly;
+    }
+
+    /**
+     * @param onlyMapped true to only write out reads for chips in the
+     * chip -> bib map (plus trigger reads). Only applies while the bib map
+     * is enabled and has at least one mapping.
+     */
+    public void setMappedChipsOnly(boolean onlyMapped) {
+        mappedChipsOnly = onlyMapped;
+        prefs.putBoolean("MappedChipsOnly", onlyMapped);
+    }
+
+    /**
+     * @param enabled true while the "Use Chip -> Bib Map" switch is on
+     */
+    public void setBibMapEnabled(boolean enabled) {
+        bibMapEnabled = enabled;
+        bibMapVersion.incrementAndGet();
+    }
+
+    /**
+     * @return true if bibs are being looked up: the "Use Chip -> Bib Map"
+     * switch is on and the map has at least one mapping
+     */
+    public boolean isBibMapInUse() {
+        return bibMapEnabled && !bibChipMap.isEmpty();
+    }
+
+    /**
+     * @return a number that changes whenever the chip -> bib map or the
+     * "Use Chip -> Bib Map" switch changes, so the bibs shown elsewhere
+     * (e.g. the Read Review window) can be refreshed
+     */
+    public int bibMapVersion() {
+        return bibMapVersion.get();
+    }
+
+    /**
+     * Unlike the output files, there is no fallback to the chip here.
+     *
+     * @param chip the chip number (leading zeroes are ignored)
+     * @return the bib mapped to the chip, or "" if the bib map is not in
+     * use or the chip is not in it
+     */
+    public String mappedBibFor(String chip) {
+        if (!bibMapEnabled || chip == null) return "";
+        return bibChipMap.getOrDefault(Chips.normalize(chip), "");
+    }
+
+    /**
+     * @return true if the current output format (or custom format) includes
+     * the bib. Without a chip -> bib map in use, the chip is written in its place.
+     */
+    public boolean outputUsesBib() {
+        return switch (outputFormat) {
+            case BibTime, BibDateTime, RFIDServer, RFIDServer_EXT -> true;
+            case ChipTime, ChipDateTime -> false;
+            case CUSTOM -> compiledFormat.usesBib();
+        };
+    }
+
+    // The bib for a chip, or the chip itself if the map is off or has no mapping for it
+    private String bibFor(String chip) {
+        if (!bibMapEnabled || chip == null) return chip;
+        return bibChipMap.getOrDefault(Chips.normalize(chip), chip);
     }
 
     public BlockingQueue<Read> getReadQueue() {
@@ -128,11 +214,18 @@ public enum OutputProcessor {
      * Replace the chip -> bib mappings. The map is never empty part way
      * through, so reads being written at the same time still get their bibs.
      *
-     * @param newMap the new chip -> bib mappings
+     * @param newMap the new chip -> bib mappings. Leading zeroes on the
+     * chips are ignored.
      */
     public void setBibChipMap(Map<String, String> newMap) {
-        bibChipMap.putAll(newMap);
-        bibChipMap.keySet().retainAll(newMap.keySet());
+        Map<String, String> normalized = new HashMap<>();
+        newMap.forEach((chip, bib) -> {
+            String key = Chips.normalize(chip);
+            if (!key.isEmpty() && bib != null) normalized.put(key, bib);
+        });
+        bibChipMap.putAll(normalized);
+        bibChipMap.keySet().retainAll(normalized.keySet());
+        bibMapVersion.incrementAndGet();
     }
 
     /**
@@ -228,12 +321,24 @@ public enum OutputProcessor {
         Set<String> unsavedReaders = new LinkedHashSet<>();
         int unsavedCount = 0;
 
+        // Never filter against an empty map, that would drop every read
+        boolean onlyMapped = mappedChipsOnly && bibMapEnabled && !bibChipMap.isEmpty();
+        int unmappedCount = 0;
+
         for (Read read : batch) {
             Reader r = read.reader();
             // Make sure we are supposed to do something here
             if (!r.getOutputToFileProperty().get()) continue;
             String outputFile = r.getOutputFileProperty().getValueSafe();
             if (outputFile.isBlank()) continue;
+
+            if (onlyMapped) {
+                String chip = Chips.normalize(read.chip());
+                if (!TRIGGER_CHIP.equals(chip) && !bibChipMap.containsKey(chip)) {
+                    unmappedCount++;
+                    continue;
+                }
+            }
 
             if (!dirOK) {
                 unsavedReaders.add(r.getReaderNameProperty().getValueSafe());
@@ -256,6 +361,7 @@ public enum OutputProcessor {
             readsByFile.computeIfAbsent(path, p -> new ArrayList<>()).add(read);
         }
 
+        if (unmappedCount > 0) logger.trace("Skipped {} reads for chips not in the chip -> bib map", unmappedCount);
         if (unsavedCount > 0) warnMissingOutputDir(unsavedReaders, unsavedCount);
 
         if (readsByFile.size() == 1) {
@@ -354,12 +460,12 @@ public enum OutputProcessor {
 
         return switch (outputFormat) {
             case RFIDServer_EXT ->
-                antenna + "," + r.chip() + "," + bibChipMap.getOrDefault(r.chip(), r.chip()) + ",\"" + dateTime + "\"," + r.rfidReader() + "," + antenna;
-            case RFIDServer -> antenna + "," + r.chip() + "," + bibChipMap.getOrDefault(r.chip(), r.chip()) + ",\"" + time + "\""  ;
+                antenna + "," + r.chip() + "," + bibFor(r.chip()) + ",\"" + dateTime + "\"," + r.rfidReader() + "," + antenna;
+            case RFIDServer -> antenna + "," + r.chip() + "," + bibFor(r.chip()) + ",\"" + time + "\""  ;
             case ChipTime -> r.chip() + "," + time;
-            case BibTime -> bibChipMap.getOrDefault(r.chip(), r.chip()) + "," + time;
+            case BibTime -> bibFor(r.chip()) + "," + time;
             case ChipDateTime -> r.chip() + "," + date + "," + time;
-            case BibDateTime -> bibChipMap.getOrDefault(r.chip(), r.chip()) + "," +  date + "," + time;
+            case BibDateTime -> bibFor(r.chip()) + "," +  date + "," + time;
             case CUSTOM -> compiledFormat.render(r);
         };
     }

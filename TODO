@@ -1,13 +1,11 @@
 PikaDownloader TODO:
 
 General: 
-
+    
     Standardize on the good, warning, alert colors so we are not hard coded everywhere
 
 Output:
-    Filter on expected chips or only ones in Bib -> Chip mapping   
-    Have the output accordion show the bib -> chip being active or not
-    Read review / search similar to Pikatimer
+    VERIFY: Filter on expected chips   
 
 
 Local Reader: 

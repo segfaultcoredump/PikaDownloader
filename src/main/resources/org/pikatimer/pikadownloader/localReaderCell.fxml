@@ -80,6 +80,14 @@
                         <Insets bottom="2.0" left="2.0" right="2.0" top="2.0" />
                      </padding>
                   </HBox>
+                  <Label fx:id="rfidProblemLabel" managed="false" styleClass="warning-label" visible="false" wrapText="true">
+                     <font>
+                        <Font name="System Bold" size="14.0" />
+                     </font>
+                     <padding>
+                        <Insets bottom="2.0" left="2.0" right="2.0" top="2.0" />
+                     </padding>
+                  </Label>
                   <HBox fx:id="profileHBox" alignment="CENTER_LEFT" spacing="2.0">
                      <children>
                         <Label text="Profile: ">

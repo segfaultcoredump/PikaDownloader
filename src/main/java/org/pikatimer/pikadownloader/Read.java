@@ -25,8 +25,16 @@ package org.pikatimer.pikadownloader;
 // Record class to hold the reads
 
 public record Read(Reader reader, String chip, Long epochMilli, String tz, String dateTime, Integer antenna, Integer rfidReader, Double rssi) {
-    
 
+    /**
+     * @return the time of day of the read ("HH:mm:ss.SSS"). The dateTime is
+     * "yyyy-MM-dd HH:mm:ss.SSS", so this is everything after the space.
+     */
+    public String timeOfDay() {
+        if (dateTime == null) return "";
+        int firstSpace = dateTime.indexOf(' ');
+        return firstSpace < 0 ? dateTime : dateTime.substring(firstSpace + 1);
+    }
 }
 
 
