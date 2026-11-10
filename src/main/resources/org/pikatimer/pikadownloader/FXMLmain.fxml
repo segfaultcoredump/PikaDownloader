@@ -7,6 +7,7 @@
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.ListView?>
 <?import javafx.scene.control.Slider?>
+<?import javafx.scene.control.Spinner?>
 <?import javafx.scene.control.TextField?>
 <?import javafx.scene.control.TitledPane?>
 <?import javafx.scene.control.ToggleButton?>
@@ -77,13 +78,36 @@
                         <ToggleSwitch fx:id="customBibMapToggleSwitch" maxWidth="1.7976931348623157E308" prefHeight="24.0" prefWidth="188.0" text="Use Chip -&gt; Bib Map" />
                      </children>
                      <VBox.margin>
-                        <Insets top="4.0" />
+                        <Insets top="12.0" />
                      </VBox.margin>
                   </HBox>
                   <HBox alignment="CENTER_LEFT" maxWidth="1.7976931348623157E308">
                      <children>
                         <Pane maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
-                        <ToggleSwitch fx:id="mappedChipsOnlyToggleSwitch" minWidth="-Infinity" prefHeight="24.0" text="Only Output Mapped Chips" />
+                        <ToggleSwitch fx:id="mappedChipsOnlyToggleSwitch" minWidth="-Infinity" prefHeight="24.0" prefWidth="229.0" text="Only Output Mapped Chips" />
+                     </children>
+                  </HBox>
+                  <HBox alignment="CENTER_LEFT" maxWidth="1.7976931348623157E308" spacing="4.0">
+                     <children>
+                        <Pane maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
+                        <ToggleSwitch fx:id="tzOverrideToggleSwitch" minWidth="-Infinity" prefHeight="24.0" prefWidth="219.0" text="Override Timezone Offset">
+                           <HBox.margin>
+                              <Insets top="12.0" />
+                           </HBox.margin></ToggleSwitch>
+                     </children>
+                     <VBox.margin>
+                        <Insets top="4.0" />
+                     </VBox.margin>
+                  </HBox>
+                  <HBox alignment="CENTER_RIGHT">
+                     <children>
+                        <Label minWidth="-Infinity" text="UTC" />
+                        <Spinner fx:id="tzHourSpinner" minWidth="-Infinity" prefWidth="75.0" />
+                        <Label minWidth="-Infinity" text=":" />
+                        <Spinner fx:id="tzMinuteSpinner" minWidth="-Infinity" prefWidth="70.0">
+                           <HBox.margin>
+                              <Insets />
+                           </HBox.margin></Spinner>
                      </children>
                   </HBox>
                   <Label fx:id="bibWarningLabel" managed="false" maxWidth="1.7976931348623157E308" minHeight="-Infinity" prefWidth="0.0" styleClass="warning-label" text="The output format includes the bib, but no Chip -&gt; Bib map is in use. The chip number will be written in place of the bib." visible="false" wrapText="true">

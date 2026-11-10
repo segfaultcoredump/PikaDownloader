@@ -23,6 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -101,6 +102,10 @@ public enum OutputProcessor {
     // Bumped whenever the bib map or bibMapEnabled changes (see bibMapVersion())
     private final AtomicInteger bibMapVersion = new AtomicInteger();
 
+    // Timezone override (session only): the fixed UTC offset the reads are
+    // written out in, or null to keep each reader's own date/time and tz
+    private volatile ZoneOffset timezoneOverride = null;
+
     private OutputProcessor() {
         compiledFormat = CustomFormat.compile(customFormat, this::bibFor);
         setupReadProcessor();
@@ -145,6 +150,25 @@ public enum OutputProcessor {
     public void setMappedChipsOnly(boolean onlyMapped) {
         mappedChipsOnly = onlyMapped;
         prefs.putBoolean("MappedChipsOnly", onlyMapped);
+    }
+
+    /**
+     * @return the fixed UTC offset the reads are written out in, or null if
+     * the timezone override is off
+     */
+    public ZoneOffset getTimezoneOverride() {
+        return timezoneOverride;
+    }
+
+    /**
+     * Write the reads out at a fixed UTC offset: the date/time is recomputed
+     * from the epochMilli (which does not change) and the tz is replaced.
+     * Applies from the next batch of reads. Not saved.
+     *
+     * @param offset the offset, or null to turn the override off
+     */
+    public void setTimezoneOverride(ZoneOffset offset) {
+        timezoneOverride = offset;
     }
 
     /**
@@ -364,17 +388,23 @@ public enum OutputProcessor {
         if (unmappedCount > 0) logger.trace("Skipped {} reads for chips not in the chip -> bib map", unmappedCount);
         if (unsavedCount > 0) warnMissingOutputDir(unsavedReaders, unsavedCount);
 
+        // Read once, so the whole batch uses the same offset
+        ZoneOffset offset = timezoneOverride;
+
         if (readsByFile.size() == 1) {
-            readsByFile.forEach(this::writeReads);
+            readsByFile.forEach((path, reads) -> writeReads(path, reads, offset));
         } else if (!readsByFile.isEmpty()) {
             // One task per file, so a file never has two writers
             try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-                readsByFile.forEach((path, reads) -> executor.submit(() -> writeReads(path, reads)));
+                readsByFile.forEach((path, reads) -> executor.submit(() -> writeReads(path, reads, offset)));
             }
         }
     }
 
-    private void writeReads(Path path, List<Read> reads) {
+    // offset: the timezone override, or null for the reader's own date/time.
+    // Only applied here (not when the read comes in) so de-duplication and
+    // the reader's last read are unaffected.
+    private void writeReads(Path path, List<Read> reads, ZoneOffset offset) {
         try {
             logger.trace("Writing {} reads to {}", reads.size(), path);
             BufferedWriter outputFileBW = bufferedWriterMap.get(path);
@@ -394,7 +424,7 @@ public enum OutputProcessor {
             for (Read read : reads) {
                 String line;
                 try {
-                    line = readToString(read);
+                    line = readToString(read.atOffset(offset));
                 } catch (RuntimeException ex) {
                     // Skip the bad read, but keep going with the rest
                     logger.error("Unable to format read {} from {}: {}", read.chip(), read.reader().getReaderNameProperty().getValueSafe(), ex.toString());

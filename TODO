@@ -7,28 +7,19 @@ General:
 Output:
     VERIFY: Filter on expected chips   
     Send to RaceDayScoring via streams via Race Result / Chronotrack / other emulation 
-    Option to "freeze" the TZ and/or used a fixed tz offset before writing the data to the file or tcp stream
-
+    
 
 Local Reader: 
     Manual add of IP / hostname and port in discovery window
     Migrate to Jackson json library
     Migrate from org.java_websocket to java.net.http websocket client
     
-    Update TitledPane to show reader battery (if available) and connectivity status
-
 Remote Reader (v1.1):
-    Connect to remote PikaRelay
+    Mimic LocalReader except that we connect to remote PikaRelay
     Show online status
-    Multi-select the 'add reader' option
-    Beep on chip read (volume and pitch can be changed on a per-reader basis)
-    Red highlights around reader if it is in a "warning" state (low batt, not connected, etc)
-
+    Post commands to PikaRelay (start, rewind)
+    Multi-select the 'add reader' option   
     
-    Hide Remote Reader Battery Status if not available
-    
-    Update TitledPane to show reader battery and connectivity stats (if available)
-   
 
 
 

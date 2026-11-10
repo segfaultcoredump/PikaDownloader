@@ -48,9 +48,9 @@ import org.slf4j.LoggerFactory;
 public enum ReadAlert {
     INSTANCE;
 
-    public static final int MIN_HZ = 250;
-    public static final int MAX_HZ = 1500;
-    public static final int DEFAULT_HZ = 600;
+    public static final int MIN_HZ = 100;
+    public static final int MAX_HZ = 1000;
+    public static final int DEFAULT_HZ = 250;
     public static final int DEFAULT_VOLUME = 50;
 
     private static final Logger logger = LoggerFactory.getLogger(ReadAlert.class);

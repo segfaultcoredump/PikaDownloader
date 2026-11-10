@@ -40,8 +40,11 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.Enumeration;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -72,6 +75,8 @@ import javafx.scene.control.Dialog;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.Slider;
+import javafx.scene.control.Spinner;
+import javafx.scene.control.SpinnerValueFactory.IntegerSpinnerValueFactory;
 import javafx.scene.control.TitledPane;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.input.MouseButton;
@@ -83,6 +88,7 @@ import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
+import javafx.util.StringConverter;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.slf4j.Logger;
@@ -124,6 +130,14 @@ public class FXMLmainController {
 
     @FXML    TitledPane outputSettingsTitledPane;
     @FXML    Label bibWarningLabel;
+
+    // Timezone override (session only): -12:00 to +14:00, 15 minute steps
+    @FXML    ToggleSwitch tzOverrideToggleSwitch;
+    @FXML    Spinner<Integer> tzHourSpinner;
+    @FXML    Spinner<Integer> tzMinuteSpinner;
+    private static final int TZ_MIN_HOURS = -12;
+    private static final int TZ_MAX_HOURS = 14;
+    private static final int TZ_MINUTE_STEP = 15;
 
     // Read Alerts (volume and mute for every reader)
     @FXML    ToggleButton alertMuteToggleButton;
@@ -277,6 +291,7 @@ public class FXMLmainController {
             logger.debug("CustomOutputFormat Changed: {} -> {}", oldValue, newValue);
             updateBibWarning();
         });
+        setupTimezoneOverride();
         syncBibMapState();
 
         // Restore the output directory from the last run (if it is still usable)
@@ -349,6 +364,90 @@ public class FXMLmainController {
         });
     }
 
+    // Timezone override: write the reads out at a fixed UTC offset (session
+    // only). The spinners start at the current system offset and stay
+    // enabled while the override is off, so the offset can be picked before
+    // it is turned on.
+    private void setupTimezoneOverride() {
+        int totalMinutes = ZonedDateTime.now().getOffset().getTotalSeconds() / 60;
+        int hours = Math.clamp(totalMinutes / 60, TZ_MIN_HOURS, TZ_MAX_HOURS);
+        int minutes = isTzHourLimit(hours) ? 0 : Math.abs(totalMinutes % 60) / TZ_MINUTE_STEP * TZ_MINUTE_STEP;
+
+        IntegerSpinnerValueFactory hourFactory = new IntegerSpinnerValueFactory(TZ_MIN_HOURS, TZ_MAX_HOURS, hours, 1);
+        hourFactory.setConverter(spinnerConverter("%+03d", hourFactory));
+        IntegerSpinnerValueFactory minuteFactory = new IntegerSpinnerValueFactory(0, 60 - TZ_MINUTE_STEP, minutes, TZ_MINUTE_STEP);
+        minuteFactory.setConverter(spinnerConverter("%02d", minuteFactory));
+        // No wrap around: Spinner's wrap is off with a step, and throws with a max of 0
+        tzHourSpinner.setValueFactory(hourFactory);
+        tzMinuteSpinner.setValueFactory(minuteFactory);
+        tzHourSpinner.setEditable(false);
+        tzMinuteSpinner.setEditable(false);
+        tzHourSpinner.getEditor().setAlignment(Pos.CENTER_RIGHT);
+        tzMinuteSpinner.getEditor().setAlignment(Pos.CENTER_RIGHT);
+
+        // -12:00 and +14:00 are the ends of the range, so no minutes there.
+        // Lowering the max clamps the minutes to 00.
+        hourFactory.valueProperty().addListener((observable, oldValue, newValue) -> {
+            minuteFactory.setMax(newValue != null && isTzHourLimit(newValue) ? 0 : 60 - TZ_MINUTE_STEP);
+            applyTimezoneOverride();
+        });
+        minuteFactory.valueProperty().addListener((observable, oldValue, newValue) -> applyTimezoneOverride());
+        tzOverrideToggleSwitch.selectedProperty().addListener((observable, oldValue, newValue) -> applyTimezoneOverride());
+
+        applyTimezoneOverride(); // starts off
+    }
+
+    private static boolean isTzHourLimit(int hours) {
+        return hours == TZ_MIN_HOURS || hours == TZ_MAX_HOURS;
+    }
+
+    // Shows the spinner values with a format. The spinners aren't editable,
+    // but parse anything typed in anyway, keeping the value if it is bad.
+    private static StringConverter<Integer> spinnerConverter(String format, IntegerSpinnerValueFactory factory) {
+        return new StringConverter<>() {
+            @Override
+            public String toString(Integer value) {
+                return value == null ? "" : String.format(format, value);
+            }
+
+            @Override
+            public Integer fromString(String text) {
+                try {
+                    return Integer.valueOf(text.trim());
+                } catch (NumberFormatException | NullPointerException ex) {
+                    return factory.getValue();
+                }
+            }
+        };
+    }
+
+    // The offset in the spinners. The minutes take the sign of the hours
+    // (-3 and 30 is -03:30).
+    private ZoneOffset selectedTimezoneOffset() {
+        int hours = tzHourSpinner.getValue();
+        int minutes = tzMinuteSpinner.getValue();
+        return ZoneOffset.ofHoursMinutes(hours, hours < 0 ? -minutes : minutes);
+    }
+
+    // Push the override switch and spinners to the OutputProcessor
+    private void applyTimezoneOverride() {
+        ZoneOffset offset = tzOverrideToggleSwitch.isSelected() ? selectedTimezoneOffset() : null;
+        if (!Objects.equals(offset, OutputProcessor.INSTANCE.getTimezoneOverride())) {
+            OutputProcessor.INSTANCE.setTimezoneOverride(offset);
+            logger.debug("Timezone override: {}", offset == null ? "Off" : displayOffset(offset));
+        }
+        updateOutputStatus();
+    }
+
+    /**
+     * @param offset a UTC offset
+     * @return the offset as shown to the user: "-05:00", or "+00:00" for
+     * UTC (which ZoneOffset shows as "Z")
+     */
+    static String displayOffset(ZoneOffset offset) {
+        return offset.getTotalSeconds() == 0 ? "+00:00" : offset.getId();
+    }
+
     // Check the output directory now. Only call this on the FX thread when the
     // directory was just set (it does file I/O)
     private void refreshOutputDirStatus() {
@@ -406,14 +505,18 @@ public class FXMLmainController {
         }
         outputSettingsTitledPane.getStyleClass().remove("error-pane");
 
+        String status;
         if (isBibMapInUse()) {
             int chips = OutputProcessor.INSTANCE.getBibChipMap().size();
             boolean filtering = mappedChipsOnlyToggleSwitch.isSelected();
-            outputStatusLabel.setText("Bib Map: On (" + chips + (chips == 1 ? " chip)" : " chips)")
-                    + " · Filter: " + (filtering ? "On" : "Off"));
+            status = "Bib Map: On (" + chips + (chips == 1 ? " chip)" : " chips)")
+                    + " · Filter: " + (filtering ? "On" : "Off");
         } else {
-            outputStatusLabel.setText("Bib Map: Off · Filter: Off");
+            status = "Bib Map: Off · Filter: Off";
         }
+        ZoneOffset tzOverride = OutputProcessor.INSTANCE.getTimezoneOverride();
+        if (tzOverride != null) status += " · TZ: " + displayOffset(tzOverride);
+        outputStatusLabel.setText(status);
     }
 
     private void addLocalDialog() {

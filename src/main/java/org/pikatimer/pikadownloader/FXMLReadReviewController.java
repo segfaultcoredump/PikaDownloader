@@ -16,6 +16,7 @@
  */
 package org.pikatimer.pikadownloader;
 
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -24,6 +25,7 @@ import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Predicate;
@@ -97,7 +99,9 @@ public class FXMLReadReviewController {
     // need to be rebuilt rather than just merged.
     private Map<Reader, String> readerNames = null;
     private int bibMapVersion = -1;
-    private Filter filter = new Filter(null, Set.of(), Map.of(), false);
+    // The timezone override (null when off): times are shown at this offset
+    private ZoneOffset tzOverride = null;
+    private Filter filter = new Filter(null, Set.of(), Map.of(), false, null);
     private Comparator<Entry> comparator = NEWEST_FIRST;
 
     // The last valid search (null for none)
@@ -118,7 +122,8 @@ public class FXMLReadReviewController {
         readerColumn.setCellValueFactory(c -> c.getValue().read().reader().getReaderNameProperty());
         chipColumn.setCellValueFactory(c -> new ReadOnlyStringWrapper(c.getValue().read().chip()));
         bibColumn.setCellValueFactory(c -> new ReadOnlyStringWrapper(OutputProcessor.INSTANCE.mappedBibFor(c.getValue().read().chip())));
-        timeColumn.setCellValueFactory(c -> new ReadOnlyStringWrapper(c.getValue().read().timeOfDay()));
+        // At the timezone override's offset (if on), to match the output files
+        timeColumn.setCellValueFactory(c -> new ReadOnlyStringWrapper(c.getValue().read().timeOfDay(tzOverride)));
 
         // Not used by the sort policy below (see columnComparator()), but
         // keeps the table's own comparator in line with it
@@ -184,9 +189,11 @@ public class FXMLReadReviewController {
             boolean bibInUse = OutputProcessor.INSTANCE.isBibMapInUse();
             if (bibColumn.isVisible() != bibInUse) bibColumn.setVisible(bibInUse);
 
-            if (!names.equals(readerNames) || OutputProcessor.INSTANCE.bibMapVersion() != bibMapVersion) {
-                // A reader was added or renamed, or the bibs changed, so the
-                // current order (and filter) may be out of date
+            if (!names.equals(readerNames) || OutputProcessor.INSTANCE.bibMapVersion() != bibMapVersion
+                    || !Objects.equals(OutputProcessor.INSTANCE.getTimezoneOverride(), tzOverride)) {
+                // A reader was added or renamed, or the bibs or the timezone
+                // override changed, so the current order (and filter) may be
+                // out of date
                 rebuild(false);
             } else if (fresh.length > 0) {
                 addRows(fresh);
@@ -208,8 +215,10 @@ public class FXMLReadReviewController {
 
         readerNames = currentReaderNames();
         bibMapVersion = OutputProcessor.INSTANCE.bibMapVersion();
+        tzOverride = OutputProcessor.INSTANCE.getTimezoneOverride();
+        timeColumn.setText(tzOverride == null ? "Time" : "Time (" + FXMLmainController.displayOffset(tzOverride) + ")");
         filter = new Filter(searchPattern, Set.copyOf(readerCheckComboBox.getCheckModel().getCheckedItems()),
-                readerNames, bibColumn.isVisible());
+                readerNames, bibColumn.isVisible(), tzOverride);
         comparator = currentComparator(readerNames);
 
         Entry[] shown = filter.matchesAll() ? all : Arrays.stream(all).parallel().filter(filter).toArray(Entry[]::new);
@@ -368,7 +377,9 @@ public class FXMLReadReviewController {
     }
 
     // Immutable, so it can be used from a parallel stream
-    private record Filter(Pattern pattern, Set<String> readers, Map<Reader, String> names, boolean bibVisible) implements Predicate<Entry> {
+    // offset: the timezone override (null when off), for the time search
+    private record Filter(Pattern pattern, Set<String> readers, Map<Reader, String> names, boolean bibVisible,
+            ZoneOffset offset) implements Predicate<Entry> {
 
         boolean matchesAll() {
             return pattern == null && readers.isEmpty();
@@ -383,7 +394,7 @@ public class FXMLReadReviewController {
             return pattern.matcher(read.chip()).find()
                     || pattern.matcher(name).find()
                     || (bibVisible && pattern.matcher(OutputProcessor.INSTANCE.mappedBibFor(read.chip())).find())
-                    || pattern.matcher(read.timeOfDay()).find();
+                    || pattern.matcher(read.timeOfDay(offset)).find();
         }
     }
 }

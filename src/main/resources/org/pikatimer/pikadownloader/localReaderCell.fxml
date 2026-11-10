@@ -140,13 +140,13 @@
                   </HBox>
                   <TitledPane expanded="false" text="Advanced">
                      <content>
-                        <VBox spacing="4.0">
+                        <VBox spacing="12.0">
                            <children>
                               <HBox alignment="CENTER_LEFT" spacing="5.0">
                                  <children>
                                     <Label minWidth="-Infinity" text="Alert Tone:" />
-                                    <Slider fx:id="alertToneSlider" blockIncrement="50.0" max="1500.0" maxWidth="1.7976931348623157E308" min="250.0" value="600.0" HBox.hgrow="ALWAYS" />
-                                    <Label fx:id="alertToneLabel" alignment="CENTER_RIGHT" minWidth="-Infinity" prefWidth="60.0" text="600 Hz" />
+                                    <Slider fx:id="alertToneSlider" blockIncrement="50.0" max="1000.0" maxWidth="1.7976931348623157E308" min="100.0" value="250.0" HBox.hgrow="ALWAYS" />
+                                    <Label fx:id="alertToneLabel" alignment="CENTER_RIGHT" minWidth="-Infinity" prefWidth="60.0" text="250 Hz" />
                                     <CheckBox fx:id="alertMuteCheckBox" minWidth="-Infinity" mnemonicParsing="false" text="Mute" />
                                  </children>
                               </HBox>
