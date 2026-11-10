@@ -215,7 +215,7 @@ public class LocalReaderCellController {
             logger.debug("ipLabel Click event detected: {} and {}",event.getButton(),event.getClickCount());
             if (event.getButton() == MouseButton.PRIMARY && event.getClickCount() == 2) {
                 HostServices hostServices = PikaDownloaderPrefs.INSTANCE.getApplication().getHostServices();
-                String url = "http://" + reader.getReaderIPProperty().getValue() + ":" +  reader.getReaderPortProperty().getValue();
+                String url = reader.getBaseURL();
                 logger.debug("Opening {}",url);
                 hostServices.showDocument(url);
             }

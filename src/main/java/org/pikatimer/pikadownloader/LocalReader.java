@@ -26,6 +26,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.ByteBuffer;
+import java.nio.channels.UnresolvedAddressException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -44,8 +45,10 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.prefs.Preferences;
+import javax.net.ssl.SSLException;
 import javafx.animation.Animation;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
@@ -107,6 +110,10 @@ public class LocalReader implements Reader {
     
     private StringProperty readerIPProperty = new SimpleStringProperty();
     private StringProperty readerPortProperty = new SimpleStringProperty();
+
+    // True for https:// and wss:// (e.g. a unit behind a TLS reverse proxy).
+    // Discovered units are always plain http:// and ws://
+    private final boolean secure;
     
     //private StringProperty readerIDProperty = new SimpleStringProperty();
     private Pane controlPane  = null;
@@ -174,6 +181,17 @@ public class LocalReader implements Reader {
     Timeline timeline;
 
     public LocalReader(String reader_ip, String port, String reader_id){
+        this(reader_ip, port, reader_id, false);
+    }
+
+    /**
+     * @param reader_ip the unit's IP address or hostname
+     * @param port the unit's web port
+     * @param reader_id the unit ID (from discovery or /status), used for the pref keys
+     * @param secure true to use https:// and wss://, false for http:// and ws://
+     */
+    public LocalReader(String reader_ip, String port, String reader_id, boolean secure){
+        this.secure = secure;
         readerIPProperty.setValue(reader_ip);
         //readerIDProperty.setValue(reader_id);
         readerNameProperty.setValue(reader_id);
@@ -275,7 +293,7 @@ public class LocalReader implements Reader {
 
                 try {
                     // Start listening for events....
-                    String wsPikaURL = "ws://" + readerIPProperty.getValue() + ":" + readerPortProperty.getValueSafe() + "/events";
+                    String wsPikaURL = (secure ? "wss://" : "ws://") + uriHost(readerIPProperty.getValueSafe()) + ":" + readerPortProperty.getValueSafe() + "/events";
                     logger.debug("Connecting to wsPikaURL: {}", wsPikaURL);
                     EventWebSocketClient client = new EventWebSocketClient(wsPikaURL, reader);
                     webSocketClient = client;
@@ -559,7 +577,62 @@ public class LocalReader implements Reader {
     }
 
     private String baseURL() {
-        return "http://" + readerIPProperty.getValueSafe() + ":" + readerPortProperty.getValueSafe();
+        return baseURL(secure, readerIPProperty.getValueSafe(), readerPortProperty.getValueSafe());
+    }
+
+    // The reader's web address, e.g. http://192.168.1.10:8080
+    String getBaseURL() {
+        return baseURL();
+    }
+
+    private static String baseURL(boolean secure, String host, String port) {
+        return (secure ? "https://" : "http://") + uriHost(host) + ":" + port;
+    }
+
+    // IPv6 literals need [brackets] in a URL
+    static String uriHost(String host) {
+        if (host.contains(":") && !host.startsWith("[")) return "[" + host + "]";
+        return host;
+    }
+
+    /**
+     * Checks that a PikaReader answers at an address that was entered by hand.
+     *
+     * @param secure true for https://, false for http://
+     * @param host the IP address or hostname
+     * @param port the web port
+     * @return completes with the unit ID from GET /status, or exceptionally
+     * if nothing answers or the response is not from a PikaReader
+     */
+    static CompletableFuture<String> probeStatus(boolean secure, String host, int port) {
+        HttpRequest request;
+        try {
+            request = HttpRequest.newBuilder()
+                    .uri(URI.create(baseURL(secure, host, String.valueOf(port)) + "/status"))
+                    .timeout(Duration.ofSeconds(3))
+                    .GET()
+                    .build();
+        } catch (IllegalArgumentException ex) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("Invalid address"));
+        }
+        logger.debug("Checking for a PikaReader at {}", request.uri());
+        return httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+            // The request timeout may not cover the connect, so back it up
+            .orTimeout(5, TimeUnit.SECONDS)
+            .thenApply(response -> {
+                // A PikaReader always answers /status
+                if (response.statusCode() < 200 || response.statusCode() > 299) {
+                    throw new RuntimeException("Not a PikaReader (" + responseError(response) + ")");
+                }
+                String unitID;
+                try {
+                    unitID = new JSONObject(response.body()).optString("unitID", "");
+                } catch (JSONException ex) {
+                    unitID = "";
+                }
+                if (unitID.isBlank()) throw new RuntimeException("Not a PikaReader (no unitID in /status)");
+                return unitID;
+            });
     }
 
     // The "error" from a PikaReader error response, or the HTTP status code
@@ -581,7 +654,12 @@ public class LocalReader implements Reader {
             cause = cause.getCause();
         }
         if (cause instanceof HttpTimeoutException) return "The reader did not respond in time";
-        if (cause instanceof ConnectException) return "Unable to connect to the reader";
+        if (cause instanceof ConnectException) {
+            if (cause.getCause() instanceof UnresolvedAddressException) return "Unknown host";
+            return "Unable to connect to the reader";
+        }
+        if (cause instanceof TimeoutException) return "The reader did not respond in time";
+        if (cause instanceof SSLException) return "Secure connection failed: " + cause.getMessage();
         return cause.getMessage() != null ? cause.getMessage() : cause.toString();
     }
 

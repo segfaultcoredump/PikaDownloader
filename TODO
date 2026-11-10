@@ -5,12 +5,10 @@ General:
     Standardize on the good, warning, alert colors so we are not hard coded everywhere
 
 Output:
-    VERIFY: Filter on expected chips   
     Send to RaceDayScoring via streams via Race Result / Chronotrack / other emulation 
     
 
 Local Reader: 
-    Manual add of IP / hostname and port in discovery window
     Migrate to Jackson json library
     Migrate from org.java_websocket to java.net.http websocket client
     

@@ -25,7 +25,9 @@ import java.net.InterfaceAddress;
 import java.net.NetworkInterface;
 import java.net.URI;
 import java.net.URLEncoder;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -46,16 +48,22 @@ import java.util.Enumeration;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.prefs.Preferences;
 import java.util.regex.Pattern;
+import javafx.animation.PauseTransition;
 import javafx.application.Platform;
+import javafx.beans.InvalidationListener;
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.BooleanBinding;
 import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
 import javafx.concurrent.Task;
@@ -74,14 +82,18 @@ import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.SelectionMode;
+import javafx.scene.control.Separator;
 import javafx.scene.control.Slider;
 import javafx.scene.control.Spinner;
+import javafx.scene.control.TextFormatter;
 import javafx.scene.control.SpinnerValueFactory.IntegerSpinnerValueFactory;
 import javafx.scene.control.TitledPane;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
@@ -519,31 +531,41 @@ public class FXMLmainController {
         outputStatusLabel.setText(status);
     }
 
+    // A reader that is entered by hand in the Add Local Reader dialog.
+    // The last one that was added is remembered for the next time.
+    private static final String HTTP = "http://";
+    private static final String HTTPS = "https://";
+    private static final String MANUAL_PROTOCOL_PREF = "ManualReaderProtocol";
+    private static final String MANUAL_HOST_PREF = "ManualReaderHost";
+    private static final String MANUAL_PORT_PREF = "ManualReaderPort";
+    // Just a host name or IP address (no scheme, path, user or spaces)
+    private static final Pattern MANUAL_HOST_PATTERN = Pattern.compile("[^\\s/@?#]+");
+
     private void addLocalDialog() {
 
         logger.debug("Starting discover...");
         ObservableList<DiscoveredLocalReader> readers = FXCollections.observableArrayList();
         BooleanProperty scanCompleted = new SimpleBooleanProperty(false);
         BooleanProperty dialogClosed = new SimpleBooleanProperty(false);
-        Map<String,LocalReader> readerMap = new HashMap();
-        
-        
+
+        // The readers we already have, so discovery doesn't offer them again.
+        // Collected here on the FX thread, the scanner thread only reads them.
+        // Check the unit ID too: a reader added by hostname has no IP here.
+        Set<String> existingIPs = new HashSet<>();
+        Set<String> existingNames = new HashSet<>();
+        readerList.forEach(x -> {
+            if (x instanceof LocalReader r) {
+                existingIPs.add(r.getReaderIPProperty().getValueSafe());
+                existingNames.add(r.getReaderNameProperty().getValueSafe().toUpperCase());
+                logger.debug("Adding existing reader to the exclude list: {} {}", r.getReaderNameProperty().getValueSafe(), r.getReaderIPProperty().getValueSafe());
+            }
+        });
+
         // start a discovery task in a background thread
         Task pikaSearch = new Task<Void>() {
             @Override
             public Void call() {
-                
-                logger.debug("Excluding existing readers...");
-                readerList.forEach(x -> {
-                    if (x instanceof LocalReader r){
-                        readerMap.put(r.getReaderIPProperty().get(), r);
-                        logger.debug("Adding existing reader IP to exclude list: {}",r.getReaderIPProperty().get());
-                    }
-                });
-                
-                // This is ugly but it works
-                byte one = Integer.valueOf(1).byteValue();
-                byte zero = Integer.valueOf(0).byteValue();
+
                 byte[] packetData = "DISCOVER_PIKA_READER_REQUEST".getBytes();
 
                 // Find the server using UDP broadcast
@@ -610,7 +632,8 @@ public class FXMLmainController {
                                     u.UnitName.set(msg[1].toUpperCase());
                                     u.PORT.set(msg[2]);
                                     // If we have a new DiscoveredLocalReader, save it. 
-                                    if (!readers.contains(u) && !readerMap.containsKey(u.IP.getValue())) {
+                                    if (!readers.contains(u) && !existingIPs.contains(u.IP.getValue())
+                                            && !existingNames.contains(u.UnitName.getValue())) {
                                         Platform.runLater(() -> {
                                             if (!readers.contains(u)) {
                                                 readers.add(u);
@@ -652,14 +675,16 @@ public class FXMLmainController {
         Dialog<List<DiscoveredLocalReader>> dialog = new Dialog();
         dialog.resizableProperty().set(true);
         dialog.getDialogPane().setMaxHeight(Screen.getPrimary().getVisualBounds().getHeight() - 150);
+        dialog.getDialogPane().getStylesheets().add(getClass().getResource("PikaDownloader.css").toExternalForm());
         dialog.setTitle("Discover...");
-        dialog.setHeaderText("Discover Local PikaReader units");
+        // Keep this short enough for one line: the dialog is sized to the manual entry row
+        dialog.setHeaderText("Discover PikaReader units or enter an address");
         ButtonType selectButtonType = new ButtonType("Select", ButtonBar.ButtonData.OK_DONE);
         dialog.getDialogPane().getButtonTypes().addAll(selectButtonType, ButtonType.CANCEL);
 
         // Create a scrollPane to put the tables and such in
         VBox mainVBox = new VBox();
-        mainVBox.setPrefWidth(250);
+        mainVBox.setSpacing(5);
         mainVBox.setStyle("-fx-font-size: 16px;"); // Make the scroll bar a bit larger
         VBox progressVBox = new VBox();
         progressVBox.setAlignment(Pos.CENTER);
@@ -694,53 +719,198 @@ public class FXMLmainController {
         pikaReaderListView.managedProperty().bind(Bindings.size(readers).greaterThanOrEqualTo(1));
 
         ultraListVBox.setPrefHeight(1750);
+        // Shrink the list, not the manual entry, when the dialog is short
+        VBox.setVgrow(ultraListVBox, Priority.ALWAYS);
 
         ultraListVBox.getChildren().add(notFound);
         ultraListVBox.visibleProperty().bind(scanCompleted);
         ultraListVBox.managedProperty().bind(scanCompleted);
+
+        // Manual entry: protocol, IP address or hostname, and port (blank for 80 / 443)
+        ChoiceBox<String> protocolChoiceBox = new ChoiceBox<>(FXCollections.observableArrayList(HTTP, HTTPS));
+        protocolChoiceBox.setValue(HTTP);
+        TextField hostTextField = new TextField();
+        hostTextField.setPromptText("IP address or hostname");
+        // Sizes in em, relative to the dialog's 16px font. The host field
+        // still grows if the dialog is made wider; the port only needs 5 digits.
+        hostTextField.setStyle("-fx-pref-width: 10.75em;");
+        HBox.setHgrow(hostTextField, Priority.ALWAYS);
+        TextField portTextField = new TextField();
+        portTextField.setStyle("-fx-pref-width: 4.5em;");
+        portTextField.setTextFormatter(new TextFormatter<String>(change ->
+                change.getControlNewText().matches("\\d{0,5}") ? change : null));
+        portTextField.promptTextProperty().bind(Bindings.when(protocolChoiceBox.valueProperty().isEqualTo(HTTPS)).then("443").otherwise("80"));
+        HBox manualHBox = new HBox(5, protocolChoiceBox, hostTextField, new Label(":"), portTextField);
+        manualHBox.setAlignment(Pos.CENTER_LEFT);
+
+        Label manualStatusLabel = new Label();
+        manualStatusLabel.setWrapText(true);
+        manualStatusLabel.setMinHeight(Region.USE_PREF_SIZE);
+
+        VBox manualVBox = new VBox(5, new Separator(), new Label("Or enter a PikaReader's address:"), manualHBox, manualStatusLabel);
+        manualVBox.setMinHeight(Region.USE_PREF_SIZE);
+
         mainVBox.getChildren().add(progressVBox);
         mainVBox.getChildren().add(ultraListVBox);
+        mainVBox.getChildren().add(manualVBox);
         dialog.getDialogPane().setContent(mainVBox);
 
         scanCompleted.bind(Bindings.size(readers).greaterThanOrEqualTo(1));
 
+        // The manual reader, once GET /status on it works
+        BooleanProperty manualOK = new SimpleBooleanProperty(false);
+        ObjectProperty<DiscoveredLocalReader> manualReader = new SimpleObjectProperty<>();
+        // Bumped on every edit, so the results of older checks are ignored
+        AtomicInteger manualCheck = new AtomicInteger();
+        // Wait for the typing to stop before checking
+        PauseTransition manualDebounce = new PauseTransition(javafx.util.Duration.millis(500));
+
+        InvalidationListener manualEdited = o -> {
+            manualCheck.incrementAndGet();
+            manualOK.set(false);
+            manualReader.set(null);
+            manualDebounce.stop();
+
+            String host = hostTextField.getText().trim();
+            String port = portTextField.getText();
+            if (host.isEmpty()) {
+                setStatus(manualStatusLabel, "", null);
+            } else if (!MANUAL_HOST_PATTERN.matcher(host).matches()) {
+                setStatus(manualStatusLabel, "Enter just the IP address or hostname", "warning-label");
+            } else if (!port.isEmpty() && (Integer.parseInt(port) < 1 || Integer.parseInt(port) > 65535)) {
+                setStatus(manualStatusLabel, "The port must be between 1 and 65535", "warning-label");
+            } else {
+                setStatus(manualStatusLabel, "Checking...", null);
+                manualDebounce.playFromStart();
+            }
+        };
+        protocolChoiceBox.valueProperty().addListener(manualEdited);
+        hostTextField.textProperty().addListener(manualEdited);
+        portTextField.textProperty().addListener(manualEdited);
+
+        manualDebounce.setOnFinished(event -> {
+            int check = manualCheck.get();
+            boolean secure = HTTPS.equals(protocolChoiceBox.getValue());
+            String host = hostTextField.getText().trim();
+            int portNumber = portTextField.getText().isEmpty() ? (secure ? 443 : 80) : Integer.parseInt(portTextField.getText());
+            String port = String.valueOf(portNumber);
+
+            LocalReader existing = findLocalReader(host, port, null);
+            if (existing != null) {
+                setStatus(manualStatusLabel, "Already added as " + existing.getReaderNameProperty().getValueSafe(), "warning-label");
+                return;
+            }
+
+            LocalReader.probeStatus(secure, host, portNumber).whenComplete((unitID, ex) -> Platform.runLater(() -> {
+                if (check != manualCheck.get() || dialogClosed.get()) return; // edited since, or closed
+                if (ex != null) {
+                    logger.debug("No PikaReader at {}{}:{}: {}", secure ? HTTPS : HTTP, host, port, LocalReader.errorMessage(ex));
+                    setStatus(manualStatusLabel, LocalReader.errorMessage(ex), "warning-label");
+                    return;
+                }
+                // Upper case, like discovery, so the pref keys for a unit match
+                String name = unitID.toUpperCase();
+                if (findLocalReader(null, null, name) != null) {
+                    setStatus(manualStatusLabel, name + " is already added", "warning-label");
+                    return;
+                }
+                DiscoveredLocalReader r = new DiscoveredLocalReader(host);
+                r.UnitName.set(name);
+                r.PORT.set(port);
+                r.secure = secure;
+                manualReader.set(r);
+                manualOK.set(true);
+                setStatus(manualStatusLabel, "Found " + name, "ok-label");
+            }));
+        });
+
+        // Pre-fill the last reader that was entered by hand (this checks it too)
+        Preferences prefs = pikaPrefs.getPreferences();
+        protocolChoiceBox.setValue(HTTPS.equals(prefs.get(MANUAL_PROTOCOL_PREF, HTTP)) ? HTTPS : HTTP);
+        portTextField.setText(prefs.get(MANUAL_PORT_PREF, ""));
+        hostTextField.setText(prefs.get(MANUAL_HOST_PREF, ""));
+
         // If they double click on an reader, select it and close the dialog box
         pikaReaderListView.setOnMouseClicked((MouseEvent click) -> {
             if (click.getClickCount() == 2) {
-                dialog.setResult(pikaReaderListView.getSelectionModel().getSelectedItems());
+                dialog.setResult(new ArrayList<>(pikaReaderListView.getSelectionModel().getSelectedItems()));
             }
         });
 
         dialog.getDialogPane().getScene().getWindow().sizeToScene();
 
+        // Select needs a discovered unit or a manual address that works
         Node createButton = dialog.getDialogPane().lookupButton(selectButtonType);
         BooleanBinding isNothingSelected = Bindings.isEmpty(pikaReaderListView.getSelectionModel().getSelectedItems());
-        createButton.disableProperty().bind(isNothingSelected);
+        createButton.disableProperty().bind(isNothingSelected.and(manualOK.not()));
 
         dialog.setResultConverter(dialogButton -> {
             if (dialogButton == selectButtonType) {
-                return pikaReaderListView.getSelectionModel().getSelectedItems();
+                List<DiscoveredLocalReader> chosen = new ArrayList<>(pikaReaderListView.getSelectionModel().getSelectedItems());
+                DiscoveredLocalReader manual = manualReader.get();
+                // Unless the same unit was also picked from the discovered list
+                if (manualOK.get() && manual != null && chosen.stream()
+                        .noneMatch(d -> d.UnitName.getValueSafe().equalsIgnoreCase(manual.UnitName.getValueSafe()))) {
+                    chosen.add(manual);
+                }
+                return chosen;
             }
             return null;
         });
 
         Optional<List<DiscoveredLocalReader>> result = dialog.showAndWait();
         dialogClosed.set(true);
+        manualDebounce.stop();
 
         if (result.isPresent()) {
+            DiscoveredLocalReader manual = manualReader.get();
             result.get().forEach(newReader -> {
                 String ip = newReader.IP.getValueSafe();
                 String name = newReader.UnitName.getValueSafe();
                 String port = newReader.PORT.getValueSafe();
-                LocalReader r = new LocalReader(ip, port, name);
+                LocalReader r = new LocalReader(ip, port, name, newReader.secure);
 
                 Platform.runLater(() -> {
                     readerList.add(r);
                 });
                 remoteReaderMap.put(ip, r);
-                logger.debug("New Reader: {} -> {}", name, ip);
+                logger.debug("New Reader: {} -> {}", name, r.getBaseURL());
+
+                // Remember the address for the next time
+                if (newReader == manual) {
+                    prefs.put(MANUAL_PROTOCOL_PREF, protocolChoiceBox.getValue());
+                    prefs.put(MANUAL_HOST_PREF, hostTextField.getText().trim());
+                    prefs.put(MANUAL_PORT_PREF, portTextField.getText());
+                }
             });
         }
+    }
+
+    /**
+     * Finds a local reader that has already been added.
+     *
+     * @param host match this IP address or hostname (ignoring case) and port, or null to skip
+     * @param port the port to match with the host
+     * @param unitID match this unit ID (ignoring case), or null to skip
+     * @return the matching reader, or null if there is none
+     */
+    private static LocalReader findLocalReader(String host, String port, String unitID) {
+        for (Reader x : readerList) {
+            if (x instanceof LocalReader r) {
+                if (host != null && host.equalsIgnoreCase(r.getReaderIPProperty().getValueSafe())
+                        && Objects.equals(port, r.getReaderPortProperty().getValueSafe())) return r;
+                if (unitID != null && unitID.equalsIgnoreCase(r.getReaderNameProperty().getValueSafe())) return r;
+            }
+        }
+        return null;
+    }
+
+    // Sets a status label's text, colored with a style class from
+    // PikaDownloader.css (ok-label, warning-label) or plain if null
+    private static void setStatus(Label label, String text, String styleClass) {
+        label.getStyleClass().removeAll("ok-label", "warning-label");
+        if (styleClass != null) label.getStyleClass().add(styleClass);
+        label.setText(text);
     }
 
     private void connectRemote() {
@@ -1127,6 +1297,8 @@ public class FXMLmainController {
         public StringProperty IP = new SimpleStringProperty();
         public StringProperty UnitName = new SimpleStringProperty();
         public StringProperty PORT = new SimpleStringProperty();
+        // https:// and wss:// (only for a reader entered by hand)
+        public boolean secure = false;
 
         public DiscoveredLocalReader() {
 

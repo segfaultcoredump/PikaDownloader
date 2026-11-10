@@ -95,3 +95,8 @@
 .label.warning-label {
     -fx-text-fill: #cc0000;
 }
+
+/* Good news text (e.g. a PikaReader found at a manually entered address) */
+.label.ok-label {
+    -fx-text-fill: #00A37A;
+}
