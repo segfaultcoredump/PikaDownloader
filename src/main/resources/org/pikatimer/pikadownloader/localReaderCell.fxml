@@ -2,9 +2,11 @@
 
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
+<?import javafx.scene.control.CheckBox?>
 <?import javafx.scene.control.ChoiceBox?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.ProgressBar?>
+<?import javafx.scene.control.Slider?>
 <?import javafx.scene.control.TextField?>
 <?import javafx.scene.control.TitledPane?>
 <?import javafx.scene.layout.HBox?>
@@ -138,13 +140,25 @@
                   </HBox>
                   <TitledPane expanded="false" text="Advanced">
                      <content>
-                        <HBox>
+                        <VBox spacing="4.0">
                            <children>
-                              <Button fx:id="disconnectButton" mnemonicParsing="false" text="Disconnect" />
-                              <Pane maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
-                              <Button fx:id="removeButton" mnemonicParsing="false" text="Remove" />
+                              <HBox alignment="CENTER_LEFT" spacing="5.0">
+                                 <children>
+                                    <Label minWidth="-Infinity" text="Alert Tone:" />
+                                    <Slider fx:id="alertToneSlider" blockIncrement="50.0" max="1500.0" maxWidth="1.7976931348623157E308" min="250.0" value="600.0" HBox.hgrow="ALWAYS" />
+                                    <Label fx:id="alertToneLabel" alignment="CENTER_RIGHT" minWidth="-Infinity" prefWidth="60.0" text="600 Hz" />
+                                    <CheckBox fx:id="alertMuteCheckBox" minWidth="-Infinity" mnemonicParsing="false" text="Mute" />
+                                 </children>
+                              </HBox>
+                              <HBox>
+                                 <children>
+                                    <Button fx:id="disconnectButton" mnemonicParsing="false" text="Disconnect" />
+                                    <Pane maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
+                                    <Button fx:id="removeButton" mnemonicParsing="false" text="Remove" />
+                                 </children>
+                              </HBox>
                            </children>
-                        </HBox>
+                        </VBox>
                      </content>
                   </TitledPane>
                </children>

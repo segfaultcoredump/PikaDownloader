@@ -6,8 +6,10 @@
 <?import javafx.scene.control.ChoiceBox?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.ListView?>
+<?import javafx.scene.control.Slider?>
 <?import javafx.scene.control.TextField?>
 <?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.control.ToggleButton?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.Pane?>
 <?import javafx.scene.layout.VBox?>
@@ -91,6 +93,25 @@
                   </Label>
                </children>
             </VBox>
+         </content>
+         <font>
+            <Font size="16.0" />
+         </font>
+      </TitledPane>
+      <TitledPane fx:id="readAlertsTitledPane" animated="false" collapsible="false" text="Read Alerts" VBox.vgrow="NEVER">
+         <content>
+            <HBox alignment="CENTER_LEFT" spacing="5.0">
+               <children>
+                  <ToggleButton fx:id="alertMuteToggleButton" minWidth="-Infinity" mnemonicParsing="false" prefWidth="70.0" text="Mute" />
+                  <Label minWidth="-Infinity" text="Volume">
+                     <HBox.margin>
+                        <Insets left="5.0" />
+                     </HBox.margin>
+                  </Label>
+                  <Slider fx:id="alertVolumeSlider" blockIncrement="5.0" maxWidth="1.7976931348623157E308" value="50.0" HBox.hgrow="ALWAYS" />
+                  <Label fx:id="alertVolumeLabel" alignment="CENTER_RIGHT" minWidth="-Infinity" prefWidth="40.0" text="50%" />
+               </children>
+            </HBox>
          </content>
          <font>
             <Font size="16.0" />

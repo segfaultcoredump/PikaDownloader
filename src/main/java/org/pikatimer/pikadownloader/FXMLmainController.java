@@ -71,7 +71,9 @@ import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.SelectionMode;
+import javafx.scene.control.Slider;
 import javafx.scene.control.TitledPane;
+import javafx.scene.control.ToggleButton;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
@@ -123,6 +125,11 @@ public class FXMLmainController {
     @FXML    TitledPane outputSettingsTitledPane;
     @FXML    Label bibWarningLabel;
 
+    // Read Alerts (volume and mute for every reader)
+    @FXML    ToggleButton alertMuteToggleButton;
+    @FXML    Slider alertVolumeSlider;
+    @FXML    Label alertVolumeLabel;
+
     // Second line of the Output Settings title, only shown while collapsed
     private final Label outputStatusLabel = new Label();
 
@@ -157,6 +164,7 @@ public class FXMLmainController {
      */
     public void initialize() {
         setupOutputSettingsTitle();
+        setupReadAlerts();
 
         // Set the default values from previous runs
         String endpoint = pikaPrefs.getPreferences().get("Endpoint", "");
@@ -306,6 +314,39 @@ public class FXMLmainController {
         titleVBox.setMinWidth(0);
         outputSettingsTitledPane.setGraphic(titleVBox);
         outputSettingsTitledPane.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+    }
+
+    // The Read Alerts volume and mute apply to every reader (each reader has
+    // its own tone and mute in its Advanced pane). Both are saved by ReadAlert.
+    private void setupReadAlerts() {
+        ReadAlert alert = ReadAlert.INSTANCE;
+
+        alertVolumeSlider.setMin(0);
+        alertVolumeSlider.setMax(100);
+        alertVolumeSlider.setValue(alert.getVolume());
+        alertVolumeLabel.setText(alert.getVolume() + "%");
+        alertVolumeSlider.valueProperty().addListener((observable, oldValue, newValue) -> {
+            int volume = (int) Math.round(newValue.doubleValue());
+            alert.setVolume(volume);
+            alertVolumeLabel.setText(volume + "%");
+        });
+
+        // The button names what a click will do
+        alertMuteToggleButton.setSelected(alert.isMuted());
+        alertMuteToggleButton.setText(alert.isMuted() ? "Unmute" : "Mute");
+        alertMuteToggleButton.selectedProperty().addListener((observable, oldValue, newValue) -> {
+            alert.setMuted(newValue);
+            alertMuteToggleButton.setText(newValue ? "Unmute" : "Mute");
+            logger.debug("Read alerts muted: {}", newValue);
+        });
+        alertVolumeSlider.disableProperty().bind(alertMuteToggleButton.selectedProperty());
+        alertVolumeLabel.disableProperty().bind(alertMuteToggleButton.selectedProperty());
+
+        // Play a sample (at the default tone) when they let go of the slider.
+        // A filter, since the slider's thumb may consume the release.
+        alertVolumeSlider.addEventFilter(MouseEvent.MOUSE_RELEASED, event -> {
+            if (event.getButton() == MouseButton.PRIMARY) alert.play(ReadAlert.DEFAULT_HZ);
+        });
     }
 
     // Check the output directory now. Only call this on the FX thread when the

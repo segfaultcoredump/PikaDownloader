@@ -114,6 +114,7 @@ public class Downloader extends Application {
         // Write out any queued reads and close the output files
         logger.info("Shutting down");
         OutputProcessor.INSTANCE.shutdown();
+        ReadAlert.INSTANCE.shutdown();
     }
 
     public static void main(String[] args) {

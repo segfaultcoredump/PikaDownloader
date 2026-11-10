@@ -6,11 +6,12 @@ General:
 
 Output:
     VERIFY: Filter on expected chips   
+    Send to RaceDayScoring via streams via Race Result / Chronotrack / other emulation 
+    Option to "freeze" the TZ and/or used a fixed tz offset before writing the data to the file or tcp stream
 
 
 Local Reader: 
     Manual add of IP / hostname and port in discovery window
-    Beep on chip read (volume and pitch can be changed on a per-reader basis)
     Migrate to Jackson json library
     Migrate from org.java_websocket to java.net.http websocket client
     

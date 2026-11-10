@@ -32,20 +32,24 @@ import javafx.beans.property.SimpleBooleanProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
+import javafx.event.Event;
 import javafx.fxml.FXML;
 import javafx.geometry.Pos;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ChoiceBox;
 import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
+import javafx.scene.control.Slider;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TitledPane;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.MouseButton;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
@@ -146,7 +150,12 @@ public class LocalReaderCellController {
     
     @FXML Button disconnectButton;
     @FXML Button removeButton;
-    
+
+    // Read alert (in the Advanced pane)
+    @FXML Slider alertToneSlider;
+    @FXML Label alertToneLabel;
+    @FXML CheckBox alertMuteCheckBox;
+
     BooleanProperty errorState = new SimpleBooleanProperty(false);
     
 //    UnaryOperator<Change> filter = change -> {
@@ -420,6 +429,31 @@ public class LocalReaderCellController {
         
         
         removeButton.visibleProperty().bind(reader.isEnabled().not());
+
+        // Read alert tone (rounded to 10 Hz) and mute for this reader
+        alertToneSlider.setMin(ReadAlert.MIN_HZ);
+        alertToneSlider.setMax(ReadAlert.MAX_HZ);
+        alertToneSlider.setValue(reader.getAlertToneProperty().get());
+        alertToneLabel.textProperty().bind(reader.getAlertToneProperty().asString("%d Hz"));
+        alertToneSlider.valueProperty().addListener((ov, o, n) ->
+            reader.getAlertToneProperty().set((int) Math.round(n.doubleValue() / 10.0) * 10));
+        alertMuteCheckBox.selectedProperty().bindBidirectional(reader.getAlertMutedProperty());
+        alertToneSlider.disableProperty().bind(reader.getAlertMutedProperty());
+        alertToneLabel.disableProperty().bind(reader.getAlertMutedProperty());
+
+        // Play a sample when they let go of the slider. A filter, since the
+        // slider's thumb may consume the release.
+        alertToneSlider.addEventFilter(MouseEvent.MOUSE_RELEASED, event -> {
+            if (event.getButton() == MouseButton.PRIMARY && !reader.getAlertMutedProperty().get()) {
+                ReadAlert.INSTANCE.play(reader.getAlertToneProperty().get());
+            }
+        });
+
+        // Dragging the slider must never start a drag-to-reorder of the reader
+        // list (ReaderListCell), which would cut the slider drag short. Today
+        // the reader TitledPane's skin already consumes the mouse events that
+        // bubble up to it, so this is a backstop in case that changes.
+        alertToneSlider.setOnDragDetected(Event::consume);
 
         // enter an error state if the battery is at or below 20%,
         // we have not heard from the unit in 10 seconds, or one of its

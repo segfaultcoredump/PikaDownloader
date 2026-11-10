@@ -143,6 +143,16 @@ public class LocalReader implements Reader {
     // discovery) because the STATUS messages may change the case of the name
     private final String outputPrefKey;
 
+    // Read alert (see ReadAlert): this reader's tone and mute, saved in the
+    // prefs under the same unit ID as the output file. The properties are for
+    // the UI, the volatile copies are read by the websocket thread.
+    private final String alertTonePrefKey;
+    private final String alertMutePrefKey;
+    private final IntegerProperty alertToneProperty = new SimpleIntegerProperty(ReadAlert.DEFAULT_HZ);
+    private final BooleanProperty alertMutedProperty = new SimpleBooleanProperty(false);
+    private volatile int alertTone = ReadAlert.DEFAULT_HZ;
+    private volatile boolean alertMuted = false;
+
     // True while a connection attempt is in progress
     private final AtomicBoolean connecting = new AtomicBoolean(false);
 
@@ -169,6 +179,23 @@ public class LocalReader implements Reader {
         readerNameProperty.setValue(reader_id);
         readerPortProperty.setValue(port);
         outputPrefKey = "LOCAL-READER-OUTPUT-" + reader_id;
+
+        // Read alert tone and mute (set up before connecting, reads can
+        // arrive as soon as we are connected)
+        alertTonePrefKey = "LOCAL-READER-ALERT-TONE-" + reader_id;
+        alertMutePrefKey = "LOCAL-READER-ALERT-MUTE-" + reader_id;
+        alertTone = ReadAlert.clampHz(prefs.getInt(alertTonePrefKey, ReadAlert.DEFAULT_HZ));
+        alertMuted = prefs.getBoolean(alertMutePrefKey, false);
+        alertToneProperty.set(alertTone);
+        alertMutedProperty.set(alertMuted);
+        alertToneProperty.addListener((observable, oldValue, newValue) -> {
+            alertTone = ReadAlert.clampHz(newValue.intValue());
+            prefs.putInt(alertTonePrefKey, alertTone);
+        });
+        alertMutedProperty.addListener((observable, oldValue, newValue) -> {
+            alertMuted = newValue;
+            prefs.putBoolean(alertMutePrefKey, newValue);
+        });
 
         //Connect to the reader
         connect();
@@ -412,7 +439,11 @@ public class LocalReader implements Reader {
 
         // If we don't already have it (possible with rewinds), add it.
         // New reads also go to the session read log (Read Review window).
-        if (processedReads.add(read)) ReadLog.INSTANCE.add(read);
+        // New live reads (not rewinds) play the read alert.
+        if (processedReads.add(read)) {
+            ReadLog.INSTANCE.add(read);
+            if (!rewind && !alertMuted) ReadAlert.INSTANCE.play(alertTone);
+        }
         return true;
     }
 
@@ -486,6 +517,16 @@ public class LocalReader implements Reader {
         return outputToFileProperty;
     }
     
+    // This reader's read alert tone in Hz (ReadAlert.MIN_HZ - MAX_HZ)
+    public IntegerProperty getAlertToneProperty(){
+        return alertToneProperty;
+    }
+
+    // True to silence the read alert for just this reader
+    public BooleanProperty getAlertMutedProperty(){
+        return alertMutedProperty;
+    }
+
     public void clearReadRecords(){
         readCountProperty.set(0);
         lastReadProperty.set("");
