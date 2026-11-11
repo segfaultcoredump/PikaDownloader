@@ -80,6 +80,7 @@ import javafx.scene.control.ChoiceBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Dialog;
+import javafx.scene.control.OverrunStyle;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.Separator;
@@ -156,8 +157,12 @@ public class FXMLmainController {
     @FXML    Slider alertVolumeSlider;
     @FXML    Label alertVolumeLabel;
 
-    // Second line of the Output Settings title, only shown while collapsed
+    // Extra lines of the Output Settings title, only shown while collapsed:
+    // the output directory, then the status
+    private final Label outputDirLabel = new Label();
     private final Label outputStatusLabel = new Label();
+    // Room for the TitledPane's arrow and padding beside the title graphic
+    private static final double TITLE_ARROW_ALLOWANCE = 40;
 
     // The Read Review window, while it is open
     private Stage readReviewStage = null;
@@ -324,21 +329,40 @@ public class FXMLmainController {
         OUTPUT_DIR_CHECK.scheduleWithFixedDelay(this::checkOutputDirInBackground, 5, 5, TimeUnit.SECONDS);
     }
 
-    // Replace the Output Settings title with a two line graphic: the title,
-    // plus a status line (bib map / filter state, or an output directory
-    // problem) that is only shown while the pane is collapsed
+    // Replace the Output Settings title with a graphic: the title, plus the
+    // output directory and a status line (bib map / filter state, or an
+    // output directory problem) that are only shown while the pane is
+    // collapsed
     private void setupOutputSettingsTitle() {
         Label titleLabel = new Label(outputSettingsTitledPane.getText());
         titleLabel.getStyleClass().add("output-title-label");
         titleLabel.fontProperty().bind(outputSettingsTitledPane.fontProperty());
+
+        // The field always holds the current directory, so this follows a new
+        // pick even when the old directory was fine too (no status change).
+        // Hidden when none is set, the status line says so.
+        outputDirLabel.getStyleClass().add("output-dir-label");
+        outputDirLabel.setMinWidth(0); // truncate rather than widen the window
+        outputDirLabel.setTextOverrun(OverrunStyle.CENTER_ELLIPSIS); // keep the folder name
+        outputDirLabel.textProperty().bind(ouputDirTextField.textProperty());
+        BooleanBinding showOutputDir = outputSettingsTitledPane.expandedProperty().not()
+                .and(ouputDirTextField.textProperty().isNotEmpty());
+        outputDirLabel.visibleProperty().bind(showOutputDir);
+        outputDirLabel.managedProperty().bind(showOutputDir);
 
         outputStatusLabel.getStyleClass().add("output-status-label");
         outputStatusLabel.setMinWidth(0); // truncate rather than widen the window
         outputStatusLabel.visibleProperty().bind(outputSettingsTitledPane.expandedProperty().not());
         outputStatusLabel.managedProperty().bind(outputSettingsTitledPane.expandedProperty().not());
 
-        VBox titleVBox = new VBox(titleLabel, outputStatusLabel);
+        // The TitledPane lays the graphic out at its pref width, and uses the
+        // title's pref width as its minimum width, so a long path would run
+        // past the title bar and widen the pane. Size the graphic to the pane
+        // instead so the lines truncate (as the reader titles do).
+        VBox titleVBox = new VBox(titleLabel, outputDirLabel, outputStatusLabel);
         titleVBox.setMinWidth(0);
+        titleVBox.prefWidthProperty().bind(outputSettingsTitledPane.widthProperty().subtract(TITLE_ARROW_ALLOWANCE));
+        outputSettingsTitledPane.setMinWidth(0);
         outputSettingsTitledPane.setGraphic(titleVBox);
         outputSettingsTitledPane.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
     }

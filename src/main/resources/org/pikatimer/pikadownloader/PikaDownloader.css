@@ -86,6 +86,7 @@
    .text rule above does not reach them. The reader's status line holds
    the reason for the error. */
 .titled-pane.error-pane > .title .output-title-label,
+.titled-pane.error-pane > .title .output-dir-label,
 .titled-pane.error-pane > .title .output-status-label,
 .titled-pane.error-pane > .title .reader-status-label {
     -fx-text-fill: #cc0000;

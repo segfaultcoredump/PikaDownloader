@@ -18,7 +18,14 @@
 
 package org.pikatimer.pikadownloader;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URL;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.Properties;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
@@ -40,14 +47,62 @@ public class Downloader extends Application {
     
     private static final PikaDownloaderPrefs prefs = PikaDownloaderPrefs.INSTANCE;
 
+    /**
+     * The window title, with the version and build time from
+     * pikadownloader-build.properties (filled in by Maven at build time).
+     * The build time is stored in UTC and shown in the local time zone.
+     * Missing or unfiltered values are left out.
+     */
+    static String windowTitle() {
+        Properties p = new Properties();
+        try (InputStream in = Downloader.class.getResourceAsStream("/pikadownloader-build.properties")) {
+            if (in != null) {
+                p.load(in);
+            }
+        } catch (IOException ex) {
+            logger.debug("Unable to read pikadownloader-build.properties", ex);
+        }
+
+        StringBuilder title = new StringBuilder("Pika Downloader");
+        String version = buildProperty(p, "version");
+        if (version != null) {
+            title.append(" v").append(version);
+        }
+        String built = buildProperty(p, "built");
+        if (built != null) {
+            try {
+                title.append(" (built ")
+                        .append(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+                                .format(Instant.parse(built).atZone(ZoneId.systemDefault())))
+                        .append(')');
+            } catch (DateTimeParseException ex) {
+                logger.debug("Unable to parse build time {}", built, ex);
+            }
+        }
+        return title.toString();
+    }
+
+    // A property that is missing, blank or was never filled in by Maven
+    // (still "${...}") is treated as absent.
+    private static String buildProperty(Properties p, String key) {
+        String value = p.getProperty(key);
+        if (value == null || value.isBlank() || value.startsWith("${")) {
+            return null;
+        }
+        return value.trim();
+    }
+
 
     @Override
     public void start(Stage primaryStage) throws Exception{
 
         prefs.setApplication(this);
-        
+
         mainStage=primaryStage;
-        primaryStage.setTitle("Pika Downloader v1.0");
+        String title = windowTitle();
+        // Log which build is running, so a stale install is easy to spot
+        logger.info("{}", title);
+        primaryStage.setTitle(title);
         
         Parent myPane = FXMLLoader.load(getClass().getResource("FXMLmain.fxml"));
         Scene myScene = new Scene(myPane);
