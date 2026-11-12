@@ -46,6 +46,15 @@ While the timezone override is on, the Date, Time, DateTime and TimeZone codes (
 
 See the Java API docs for DateTimeFormatter at <https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/time/format/DateTimeFormatter.html#patterns)> for valid data and time formatting codes. 
 
+## Screen Snapshots
+
+*Main Downloader UI:*
+
+<img src="assets/PikaDownloader.png" width="300">
+
+*Read Review Window:*
+
+<img src="assets/ReadReview.png" width="300">
 
 # Requirements
 * Java 25 or newer with JavaFX 25 or newer. Installable binaries are available at <https://github.com/PikaTimer/PikaDownloader/releases>
