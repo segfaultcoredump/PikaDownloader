@@ -6,11 +6,12 @@ Permits downloading timing data from a [PikaReader](https://github.com/PikaTimer
 * Connects to one or more local PikaReader systems. 
 * Allows for saving both live read data and rewinds from a PikaReader to a local text file.
 * Pre-select output format from various pre-defined basic "Chip, Date, Time" CSV file formats or use a custom output format.
+* Appends new data in realtime to the output file to enable continuous importing into a timing application.
+* Displays the status of the PikaReader system (last read, battery level if available, etc).
 * Provides a Chip -> Bib mapping function to allow for reporting a Bib number in place of the raw chip number. Leading zeroes on chip numbers are ignored when matching. If the output includes a Bib but no Chip -> Bib map is in use, the chip number is written in its place and the Output Settings pane shows a warning.
 * Optionally only outputs reads for chips that are in the Chip -> Bib map. Trigger reads (chip `0`) are always output.
 * Optionally overrides the timezone offset of the reads written to the output files. Turn on "Override Timezone Offset" and pick a fixed UTC offset from -12:00 to +14:00 in 15-minute steps (the default is the computer's current offset). The date, time and timezone of each read are recomputed from its EpochMilli, which does not change. Milliseconds are kept. The Review Reads window also shows times at the override offset. The override is not saved and is off each time PikaDownloader starts.
-* Appends new data in realtime to the output file to enable continuous importing into a timing application.
-* Displays the status of the PikaReader system (last read, battery level if available, etc).
+
 
 # Custom Output Formatting
 By selecting "Custom" as the output format, you can specify exactly how you want the reads to be written to a file.
@@ -48,7 +49,7 @@ See the Java API docs for DateTimeFormatter at <https://docs.oracle.com/en/java/
 
 ## Screen Snapshots
 
-*Main Downloader UI:*
+*Main PikaDownloader UI:*
 
 <img src="assets/PikaDownloader.png" width="300">
 
