@@ -41,7 +41,7 @@ Note that escape codes are case insensitive. You can preface the codes with eith
    * Example: The following are all equivalent and will print out the Chip number: `$C, %C, ${C}, %{CHIP}, ${chip}`
 
 For Date and Time fields, you can optionaly specify a date/time formatter by enclosing the code in brackets and by separating the output code by a format string separated by a colon (:).
-  * Example: `%{D:MM/DD/YYYY}` would print `01/02/2026`
+  * Example: `%{D:MM/dd/yyy}` would print `01/02/2026`
 
 While the timezone override is on, the Date, Time, DateTime and TimeZone codes (including formatted ones like `%{D:MM/DD/YYYY}`) use the override offset. EpochMilli is never changed.
 
