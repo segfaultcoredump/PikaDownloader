@@ -29,7 +29,6 @@ import java.nio.ByteBuffer;
 import java.nio.channels.UnresolvedAddressException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -68,16 +67,7 @@ import javafx.concurrent.Task;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
-import javafx.scene.Node;
-import javafx.scene.control.ButtonBar;
-import javafx.scene.control.ButtonType;
-import javafx.scene.control.DatePicker;
-import javafx.scene.control.Dialog;
-import javafx.scene.control.Label;
-import javafx.scene.control.TextField;
-import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
-import javafx.scene.layout.VBox;
 import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -422,23 +412,11 @@ public class LocalReader implements Reader {
         //  {"antenna":3,"chip":"23210006","rssi":-71,"reader":1,"tz":"-07:00","epochMilli":1703796324476,"type":"READ","timestamp":"2023-12-28 13:45:24.476"}
         logger.trace("Chip Read for {}: {}", readerNameProperty.getValueSafe(),tagRead);
 
-        // Extract the data
-        String chip = tagRead.optString("chip", "");
-        Number epochMilliNumber = tagRead.optNumber("epochMilli");
-        if (chip.isBlank() || epochMilliNumber == null) {
+        Read read = Read.fromJSON(this, tagRead);
+        if (read == null) {
             logger.debug("Skipping a read without a chip or epochMilli from {}: {}", readerNameProperty.getValueSafe(), tagRead);
             return false;
         }
-        Long epochMilli = epochMilliNumber.longValue();
-        Integer reader = tagRead.optInt("reader");
-        Integer port = tagRead.optInt("antenna");
-        String dateTime = tagRead.optString("timestamp", "");
-        String tz = tagRead.optString("tz", "");
-        Double rssi = tagRead.optDouble("rssi");
-
-        // create the read record
-        // Reader reader, String chip, Long epochMilli, String dateTime, Integer antenna, Integer rfidReader
-        Read read = new Read(this,chip,epochMilli, tz, dateTime, port, reader, rssi);
 
         if(! rewind && processedReads.contains(read)){
             return false;
@@ -768,82 +746,10 @@ public class LocalReader implements Reader {
             return;
         }
 
-        // open a dialog box
-        Dialog<RewindRange> dialog = new Dialog<>();
-        dialog.setTitle("Rewind");
-        dialog.setHeaderText("Rewind timing data...");
-        ButtonType rewindButtonType = new ButtonType("Rewind", ButtonBar.ButtonData.OK_DONE);
-        dialog.getDialogPane().getButtonTypes().addAll(rewindButtonType, ButtonType.CANCEL);
-
-        VBox rewindVBox = new VBox();
-        rewindVBox.setStyle("-fx-font-size: 16px;");
-
-        // start date / time
-        HBox startHBox = new HBox();
-        startHBox.setSpacing(5.0);
-        Label startLabel = new Label("From:");
-        startLabel.setMinWidth(40);
-        DatePicker startDate = new DatePicker();
-        TextField startTime = new TextField();
-        startHBox.getChildren().addAll(startLabel, startDate, startTime);
-
-        // end date / time
-        HBox endHBox = new HBox();
-        endHBox.setSpacing(5.0);
-        Label endLabel = new Label("To:");
-        endLabel.setMinWidth(40);
-        DatePicker endDate = new DatePicker();
-        TextField endTime = new TextField();
-        endHBox.getChildren().addAll(endLabel, endDate, endTime);
-
-        rewindVBox.getChildren().addAll(startHBox, endHBox);
-        dialog.getDialogPane().setContent(rewindVBox);
-
-        BooleanProperty startTimeOK = new SimpleBooleanProperty(false);
-        BooleanProperty endTimeOK = new SimpleBooleanProperty(false);
-        BooleanProperty allOK = new SimpleBooleanProperty(false);
-
-        installTimeFilter(startTime, startTimeOK);
-        installTimeFilter(endTime, endTimeOK);
-
-        // Both times valid, both dates set, and from is not after to
-        Runnable validate = () -> {
-            boolean ok = startTimeOK.get() && endTimeOK.get()
-                    && startDate.getValue() != null && endDate.getValue() != null;
-            if (ok) {
-                LocalDateTime from = toDateTime(startDate.getValue(), startTime.getText());
-                LocalDateTime to = toDateTime(endDate.getValue(), endTime.getText());
-                ok = !from.isAfter(to);
-            }
-            allOK.set(ok);
-        };
-        startTime.textProperty().addListener(o -> validate.run());
-        endTime.textProperty().addListener(o -> validate.run());
-        startDate.valueProperty().addListener(o -> validate.run());
-        endDate.valueProperty().addListener(o -> validate.run());
-
-        //Default to event date / 00:00 for the start time, event date 23:59:00 for the end time
-        startDate.setValue(LocalDate.now());
-        startTime.setText("00:00:00");
-        endDate.setValue(LocalDate.now());
-        endTime.setText("23:59:59");
-
-        Node createButton = dialog.getDialogPane().lookupButton(rewindButtonType);
-        createButton.disableProperty().bind(allOK.not());
-
-        dialog.setResultConverter(dialogButton -> {
-            if (dialogButton == rewindButtonType) {
-                return new RewindRange(
-                        toDateTime(startDate.getValue(), startTime.getText()),
-                        toDateTime(endDate.getValue(), endTime.getText()));
-            }
-            return null;
-        });
-
-        Optional<RewindRange> result = dialog.showAndWait();
+        Optional<RewindDialog.RewindRange> result = RewindDialog.show(null);
         if (result.isEmpty()) return;
 
-        RewindRange range = result.get();
+        RewindDialog.RewindRange range = result.get();
         String readerName = readerNameProperty.getValueSafe();
         String from = range.from().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
         String to = range.to().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
@@ -895,33 +801,6 @@ public class LocalReader implements Reader {
                     alert.show();
                 }
             }));
-    }
-
-    // Date + time of day (a duration from midnight, so 24:00:00 rolls over to the next day)
-    private static LocalDateTime toDateTime(LocalDate date, String time) {
-        return date.atStartOfDay().plus(DurationParser.parse(time));
-    }
-
-    // Only allow time-like input (HH:MM:SS.sss) in the field, and track if it is a valid time
-    private static void installTimeFilter(TextField timeField, BooleanProperty timeOK) {
-        timeField.textProperty().addListener((observable, oldValue, newValue) -> {
-            timeOK.setValue(DurationParser.parsable(newValue));
-            if (newValue.isEmpty() || newValue.matches("^[0-9]*(:?([0-5]?([0-9]?(:([0-5]?([0-9]?)?)?)?)?)?)?")) {
-                logger.trace("Possiblely good time (newValue: {})", newValue);
-            } else {
-                Platform.runLater(() -> {
-                    int c = timeField.getCaretPosition();
-                    if (oldValue.length() > newValue.length()) {
-                        c++;
-                    } else {
-                        c--;
-                    }
-                    timeField.setText(oldValue);
-                    timeField.positionCaret(c);
-                });
-                logger.trace("Bad time (newValue: {})", newValue);
-            }
-        });
     }
 
     private class EventWebSocketClient extends WebSocketClient {
@@ -977,5 +856,4 @@ public class LocalReader implements Reader {
 
     }
 
-    private record RewindRange(LocalDateTime from, LocalDateTime to) {}
 }

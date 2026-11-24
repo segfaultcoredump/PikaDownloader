@@ -12,11 +12,6 @@ Local Reader:
     Migrate to Jackson json library
     Migrate from org.java_websocket to java.net.http websocket client
     
-Remote Reader (v1.1):
-    Mimic LocalReader except that we connect to remote PikaRelay
-    Show online status
-    Post commands to PikaRelay (start, rewind)
-    Multi-select the 'add reader' option   
     
 
 

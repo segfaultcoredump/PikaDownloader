@@ -19,7 +19,6 @@ public enum PikaDownloaderPrefs {
     
     private static final Preferences prefs = Preferences.userRoot().node("PikaDownloader");
     private volatile File outputDir = null;
-    private String echoEndpoint = "";
     private Application application;
     ObservableList<Reader> readerList;
            
@@ -64,12 +63,25 @@ public enum PikaDownloaderPrefs {
         outputDir = d;
     }
     
-    public String getRelayEndpoint(){
-        return echoEndpoint;
+    // The PikaRelay settings from the Remote Relay section. The secret is kept
+    // in plain text in java.util.prefs (the registry on Windows, a plist on
+    // macOS), like the rest of the settings.
+    private static final String RELAY_URL_PREF = "RelayURL";
+    private static final String RELAY_KEY_PREF = "RelayKey";
+    private static final String RELAY_SECRET_PREF = "RelaySecret";
+
+    /**
+     * @return the relay from the Remote Relay section (the address may be
+     * blank or not valid yet, see PikaRelay.urlProblem)
+     */
+    public PikaRelay getRelay(){
+        return new PikaRelay(prefs.get(RELAY_URL_PREF, ""), prefs.get(RELAY_KEY_PREF, ""), prefs.get(RELAY_SECRET_PREF, ""));
     }
-    
-    public void setRelayEndpoint(String e){
-        echoEndpoint = e;
+
+    public void setRelay(PikaRelay relay){
+        prefs.put(RELAY_URL_PREF, relay.baseURL());
+        prefs.put(RELAY_KEY_PREF, relay.key());
+        prefs.put(RELAY_SECRET_PREF, relay.secret());
     }
     
     public void setApplication(Application app){

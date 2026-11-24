@@ -92,6 +92,37 @@
     -fx-text-fill: #cc0000;
 }
 
+/* -------------------------------------------------------------
+   A TitledPane with a warning (not yet an error): a remote reader
+   that has not been heard from for a while, or a relay that can't be
+   reached (RemoteReaderCellController), or the Remote Relay pane
+   when its check fails. Never set together with error-pane (this
+   block comes later, so it would win).
+   ------------------------------------------------------------- */
+.titled-pane.warning-pane > .title {
+    -fx-background-color: #fff2cc;      /* Light amber background */
+    -fx-border-color: #b37400;          /* Dark amber border */
+    -fx-border-width: 0 0 1 0;          /* Bottom border only */
+}
+.titled-pane.warning-pane > .title > .arrow-button > .arrow {
+    -fx-background-color: #b37400;
+}
+.titled-pane.warning-pane > .title .output-title-label,
+.titled-pane.warning-pane > .title .output-dir-label,
+.titled-pane.warning-pane > .title .output-status-label,
+.titled-pane.warning-pane > .title .reader-status-label {
+    -fx-text-fill: #8a5a00;
+}
+
+/* The small "Remote" tag in a remote reader's title */
+.label.remote-tag-label {
+    -fx-font-size: 0.8em;
+    -fx-text-fill: #555555;
+    -fx-border-color: #888888;
+    -fx-border-radius: 3;
+    -fx-padding: 0 3 0 3;
+}
+
 /* Warning text inside a pane (e.g. the Output Settings bib warning) */
 .label.warning-label {
     -fx-text-fill: #cc0000;

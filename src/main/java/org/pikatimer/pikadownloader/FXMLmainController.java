@@ -23,8 +23,6 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InterfaceAddress;
 import java.net.NetworkInterface;
-import java.net.URI;
-import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -36,12 +34,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
 import javafx.scene.control.TextField;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.Enumeration;
@@ -55,7 +48,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.prefs.Preferences;
 import java.util.regex.Pattern;
+import javafx.animation.Animation;
+import javafx.animation.KeyFrame;
 import javafx.animation.PauseTransition;
+import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.beans.InvalidationListener;
 import javafx.beans.binding.Bindings;
@@ -81,6 +77,7 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.OverrunStyle;
+import javafx.scene.control.PasswordField;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.Separator;
@@ -93,6 +90,7 @@ import javafx.scene.control.ToggleButton;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
@@ -117,17 +115,8 @@ public class FXMLmainController {
 
     static final Logger logger = LoggerFactory.getLogger(FXMLmainController.class);
     static final PikaDownloaderPrefs pikaPrefs = PikaDownloaderPrefs.INSTANCE;
-    private static final Pattern REGEX_PATTERN = Pattern.compile("^\\p{XDigit}+$");
 
-    private static final HttpClient httpClient = HttpClient.newBuilder()
-            .version(HttpClient.Version.HTTP_2)
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
-
-    @FXML    TextField relayURLTextField;
-    @FXML    Button connectButton;
     @FXML    ListView<Reader> readerListView;
-    @FXML    Label statusLabel;
     @FXML    Button outputDirButton;
     @FXML    TextField ouputDirTextField;
     
@@ -135,6 +124,7 @@ public class FXMLmainController {
     @FXML    ToggleSwitch customBibMapToggleSwitch;
     @FXML    ToggleSwitch mappedChipsOnlyToggleSwitch;
     @FXML    Button addLocalButton;
+    @FXML    Button addRemoteButton;
     @FXML    Button reviewReadsButton;
 
     @FXML    ChoiceBox<OutputFormat> outputFormatChoiceBox;
@@ -151,6 +141,22 @@ public class FXMLmainController {
     private static final int TZ_MIN_HOURS = -12;
     private static final int TZ_MAX_HOURS = 14;
     private static final int TZ_MINUTE_STEP = 15;
+
+    // Remote Relay (PikaRelay address and client key, saved in the prefs)
+    @FXML    TitledPane remoteRelayTitledPane;
+    @FXML    TextField relayURLTextField;
+    @FXML    TextField relayKeyTextField;
+    @FXML    PasswordField relaySecretField;
+    @FXML    Label relayStatusLabel;
+    // Extra lines of the Remote Relay title, only shown while collapsed
+    private final Label relayHostLabel = new Label();
+    private final Label relayTitleStatusLabel = new Label();
+    // True while the relay address is usable, which shows Add Remote Reader
+    private final BooleanProperty relayURLValid = new SimpleBooleanProperty(false);
+    // Bumped on every edit, so the results of older checks are ignored
+    private final AtomicInteger relayCheck = new AtomicInteger();
+    // Wait for the typing to stop before checking
+    private final PauseTransition relayDebounce = new PauseTransition(javafx.util.Duration.millis(500));
 
     // Read Alerts (volume and mute for every reader)
     @FXML    ToggleButton alertMuteToggleButton;
@@ -181,8 +187,6 @@ public class FXMLmainController {
     });
 
     static final ObservableList<Reader> readerList = FXCollections.observableArrayList();
-    static final Map<String, Reader> remoteReaderMap = new HashMap();
-    static final BooleanProperty connected = new SimpleBooleanProperty(false);
 
     private static final String errorCSS = ".invalid-field {"
             + "    -fx-text-box-border: #FF0000;"
@@ -196,9 +200,7 @@ public class FXMLmainController {
     public void initialize() {
         setupOutputSettingsTitle();
         setupReadAlerts();
-
-        // Set the default values from previous runs
-        String endpoint = pikaPrefs.getPreferences().get("Endpoint", "");
+        setupRemoteRelay();
 
         pikaPrefs.setReaderList(readerList);
 
@@ -209,28 +211,16 @@ public class FXMLmainController {
 
         reviewReadsButton.setOnAction(event -> openReadReview());
 
-        relayURLTextField.setText(endpoint);
-        statusLabel.setText("Disconnected");
-        connectButton.setOnAction(event -> {
-            if (!connected.getValue()) {
-                connectRemote();
-            } else {
-                // disconnect(); // Disconnect remote readers
-            }
-        });
         outputDirButton.setOnAction(event -> {
             changeOutputDir();
         });
 
         readerListView.setItems(readerList);
 
-        Label emptyMessage = new Label("Use the \"Add Local Reader...\" button to add a reader.");
+        Label emptyMessage = new Label("Use the \"Add Local Reader...\" button to add a reader,\n"
+                + "or set up the Remote Relay below to add remote readers.");
+        emptyMessage.setTextAlignment(javafx.scene.text.TextAlignment.CENTER);
         readerListView.setPlaceholder(emptyMessage);
-
-        // Disable stuff if we are connected
-        outputDirButton.disableProperty().bind(connected);
-        ouputDirTextField.disableProperty().bind(connected);
-        connectButton.disableProperty().bind(relayURLTextField.textProperty().isEmpty());
 
         // Don't let folks directly edit the output dir
         // force them through the directory chooser
@@ -238,9 +228,7 @@ public class FXMLmainController {
         ouputDirTextField.setOnMouseClicked(event -> {
             if (event.getButton().equals(MouseButton.PRIMARY)) {
                 if (event.getClickCount() == 2) {
-                    if (!connected.getValue()) {
-                        changeOutputDir();
-                    }
+                    changeOutputDir();
                 }
             }
         });
@@ -897,7 +885,6 @@ public class FXMLmainController {
                 Platform.runLater(() -> {
                     readerList.add(r);
                 });
-                remoteReaderMap.put(ip, r);
                 logger.debug("New Reader: {} -> {}", name, r.getBaseURL());
 
                 // Remember the address for the next time
@@ -937,218 +924,269 @@ public class FXMLmainController {
         label.setText(text);
     }
 
-    private void connectRemote() {
+    // The Remote Relay section: the PikaRelay address and client key/secret
+    // (saved in the prefs as they are typed), checked with GET /readerList
+    // after a short pause. Add Remote Reader... shows once the address is
+    // usable. The title gets the host and the check result while collapsed.
+    private void setupRemoteRelay() {
+        Label titleLabel = new Label(remoteRelayTitledPane.getText());
+        titleLabel.getStyleClass().add("output-title-label");
+        titleLabel.fontProperty().bind(remoteRelayTitledPane.fontProperty());
 
-        File outputDir = PikaDownloaderPrefs.INSTANCE.getOutputDir();
-        if (outputDir == null || !outputDir.canWrite()) {
-            // disconnect(); // Disconnect remote readers
-            Alert alert = new Alert(AlertType.ERROR);
-            alert.setTitle("Output Directory Not Set");
-            alert.setHeaderText("The output directory is not set!");
-            alert.setContentText("Please specify a valid ouput directory before connecting.");
+        relayHostLabel.getStyleClass().add("output-dir-label");
+        relayHostLabel.setMinWidth(0); // truncate rather than widen the window
+        relayHostLabel.setTextOverrun(OverrunStyle.CENTER_ELLIPSIS);
+        BooleanBinding showHost = remoteRelayTitledPane.expandedProperty().not()
+                .and(relayHostLabel.textProperty().isNotEmpty());
+        relayHostLabel.visibleProperty().bind(showHost);
+        relayHostLabel.managedProperty().bind(showHost);
 
-            alert.showAndWait();
-            return;
+        relayTitleStatusLabel.getStyleClass().add("output-status-label");
+        relayTitleStatusLabel.setMinWidth(0);
+        relayTitleStatusLabel.textProperty().bind(relayStatusLabel.textProperty());
+        relayTitleStatusLabel.visibleProperty().bind(remoteRelayTitledPane.expandedProperty().not());
+        relayTitleStatusLabel.managedProperty().bind(remoteRelayTitledPane.expandedProperty().not());
+
+        // Sized to the pane, as in setupOutputSettingsTitle()
+        VBox titleVBox = new VBox(titleLabel, relayHostLabel, relayTitleStatusLabel);
+        titleVBox.setMinWidth(0);
+        titleVBox.prefWidthProperty().bind(remoteRelayTitledPane.widthProperty().subtract(TITLE_ARROW_ALLOWANCE));
+        remoteRelayTitledPane.setMinWidth(0);
+        remoteRelayTitledPane.setGraphic(titleVBox);
+        remoteRelayTitledPane.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+
+        PikaRelay saved = pikaPrefs.getRelay();
+        relayURLTextField.setText(saved.baseURL());
+        relayKeyTextField.setText(saved.key());
+        relaySecretField.setText(saved.secret());
+
+        InvalidationListener edited = o -> relayEdited();
+        relayURLTextField.textProperty().addListener(edited);
+        relayKeyTextField.textProperty().addListener(edited);
+        relaySecretField.textProperty().addListener(edited);
+        relayDebounce.setOnFinished(event -> checkRelay());
+
+        addRemoteButton.visibleProperty().bind(relayURLValid);
+        addRemoteButton.managedProperty().bind(relayURLValid);
+        addRemoteButton.setOnAction(event -> addRemoteDialog());
+
+        relayEdited();
+    }
+
+    // The relay as entered in the Remote Relay section
+    private PikaRelay currentRelay() {
+        return new PikaRelay(relayURLTextField.getText(), relayKeyTextField.getText(), relaySecretField.getText());
+    }
+
+    private void relayEdited() {
+        relayCheck.incrementAndGet();
+        relayDebounce.stop();
+
+        PikaRelay relay = currentRelay();
+        pikaPrefs.setRelay(relay);
+
+        String problem = PikaRelay.urlProblem(relay.baseURL());
+        relayURLValid.set(problem == null);
+        relayHostLabel.setText(problem == null ? relay.host() : "");
+        if (relay.baseURL().isEmpty()) {
+            setRelayStatus("Enter the address of a PikaRelay server to add remote readers", null);
+        } else if (problem != null) {
+            setRelayStatus(problem, "warning-label");
+        } else {
+            setRelayStatus("Checking...", null);
+            relayDebounce.playFromStart();
         }
-        if (!relayURLTextField.getText().endsWith("/")) {
-            relayURLTextField.setText(relayURLTextField.getText() + "/");
-        }
-        relayURLTextField.setEditable(false);
-        statusLabel.setText("Connecting to " + relayURLTextField.getText());
-        String endpoint = relayURLTextField.getText();
+    }
 
-        // Try and connectRemote to the endpoint and get the status of the readers
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(endpoint + "status/"))
-                .setHeader("User-Agent", "Echo Transmitter") // add request header
-                .header("Content-Type", "application/json")
-                .build();
-
-        HttpResponse<String> response;
-        try {
-            response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            // print status code
-            logger.trace("FXMLmainController::connect Response Code: " + Integer.toString(response.statusCode()));
-            logger.trace("FXMLmainController::connect Response Body: " + response.body());
-
-            // If the response status code is not 200, disconnect and toss a warning
-            if (response.statusCode() != 200) {
-                // disconnect(); // Disconnect remote readers
-                Alert alert = new Alert(AlertType.WARNING);
-                alert.setTitle("Connection Error");
-                alert.setHeaderText("Unable to connect to relay service.");
-                alert.setContentText(response.body());
-
-                alert.showAndWait();
+    private void checkRelay() {
+        int check = relayCheck.get();
+        PikaRelay relay = currentRelay();
+        relay.probe().whenComplete((list, ex) -> Platform.runLater(() -> {
+            if (check != relayCheck.get()) return; // edited since
+            if (ex != null) {
+                String msg = PikaRelay.errorMessage(ex);
+                logger.debug("Relay check for {} failed: {}", relay, msg);
+                setRelayStatus(msg, "warning-label");
                 return;
             }
+            JSONArray readers = list.optJSONArray("readers");
+            int n = readers == null ? 0 : readers.length();
+            String msg = "Connected · " + n + (n == 1 ? " reader" : " readers");
+            if (relay.insecure()) msg += " · Not encrypted (use https://)";
+            setRelayStatus(msg, "ok-label");
+        }));
+    }
 
-            // convert the response body into the command array
-            JSONArray results = new JSONObject(response.body()).getJSONArray("readers");
-            // If successful, create readers and populate reader list
-            for (int j = 0; j < results.length(); j++) {
-                JSONObject p = results.getJSONObject(j);
-
-                if (p.has("mac") && REGEX_PATTERN.matcher(p.getString("mac")).matches()) {
-                    if (remoteReaderMap.containsKey(p.getString("mac"))) {
-                        //readerMap.get(p.getString("mac")).setStatus(p);
-                    } else {
-                        RemoteReader r = new RemoteReader(p.getString("mac"));
-                        r.setStatus(p);
-                        Platform.runLater(() -> {
-                            readerList.add(r);
-                        });
-                        remoteReaderMap.put(p.getString("mac"), r);
-                        logger.debug("New Reader: " + p.getString("mac"));
-                    }
-                }
+    // The status line (and the collapsed title), amber if it is a problem
+    private void setRelayStatus(String text, String styleClass) {
+        setStatus(relayStatusLabel, text, styleClass);
+        boolean warn = "warning-label".equals(styleClass);
+        if (warn) {
+            if (!remoteRelayTitledPane.getStyleClass().contains("warning-pane")) {
+                remoteRelayTitledPane.getStyleClass().add("warning-pane");
             }
-
-            connected.set(true);
-            // setup thread to poll for timing updates
-            startPollingThread();
-            // setup thread to continue to poll reader status
-            startStatusThread();
-
-            pikaPrefs.getPreferences().put("Endpoint", endpoint);
-            PikaDownloaderPrefs.INSTANCE.setRelayEndpoint(endpoint);
-            connectButton.setText("Disconnect");
-            statusLabel.setText("Connected to " + relayURLTextField.getText());
-        } catch (Exception ex) {
-            Alert alert = new Alert(AlertType.WARNING);
-            alert.setTitle("Connection Error");
-            alert.setHeaderText("Unable to connect to relay service.");
-            alert.setContentText(ex.getMessage());
-
-            alert.showAndWait();
-            // disconnect(); // Disconnect remote readers
+        } else {
+            remoteRelayTitledPane.getStyleClass().remove("warning-pane");
         }
     }
 
+    // Pick readers to add from the relay's reader list (several at once).
+    // The list is refreshed every 5 seconds while the dialog is open.
+    private void addRemoteDialog() {
+        PikaRelay relay = currentRelay();
+        if (!PikaRelay.isValidURL(relay.baseURL())) return;
 
+        ObservableList<RelayReaderEntry> entries = FXCollections.observableArrayList();
+        ListView<RelayReaderEntry> listView = new ListView<>(entries);
+        listView.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+        listView.setPrefHeight(260);
+        Label placeholder = new Label("Loading...");
+        placeholder.setTextAlignment(javafx.scene.text.TextAlignment.CENTER);
+        listView.setPlaceholder(placeholder);
+        VBox.setVgrow(listView, Priority.ALWAYS);
 
-    private void startStatusThread() {
+        Label statusLabel = new Label();
+        statusLabel.setWrapText(true);
+        statusLabel.setMinHeight(Region.USE_PREF_SIZE);
 
-        logger.trace("FXMLmainController::startStatusThread start...");
+        Button refreshButton = new Button("Refresh");
+        Pane spring = new Pane();
+        HBox.setHgrow(spring, Priority.ALWAYS);
+        HBox statusHBox = new HBox(5, statusLabel, spring, refreshButton);
+        statusHBox.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(statusLabel, Priority.SOMETIMES);
 
-        Task statusSyncTask = new Task<Void>() {
-            @Override
-            protected Void call() {
-                String endpoint = relayURLTextField.getText();
+        VBox mainVBox = new VBox(5, new Label("Select the readers to add:"), listView, statusHBox);
+        mainVBox.setStyle("-fx-font-size: 16px;");
+        mainVBox.setPrefWidth(520);
 
-                while (connected.getValue()) {
+        Dialog<List<RelayReaderEntry>> dialog = new Dialog<>();
+        dialog.resizableProperty().set(true);
+        dialog.getDialogPane().getStylesheets().add(getClass().getResource("PikaDownloader.css").toExternalForm());
+        dialog.setTitle("Add Remote Reader");
+        dialog.setHeaderText("Readers on " + relay.host());
+        ButtonType selectButtonType = new ButtonType("Select", ButtonBar.ButtonData.OK_DONE);
+        dialog.getDialogPane().getButtonTypes().addAll(selectButtonType, ButtonType.CANCEL);
+        dialog.getDialogPane().setContent(mainVBox);
 
-                    // Try and connectRemote to the endpoint and get the status of the readers
-                    HttpRequest request = HttpRequest.newBuilder()
-                            .uri(URI.create(endpoint + "status/"))
-                            .setHeader("User-Agent", "Echo Transmitter") // add request header
-                            .header("Content-Type", "application/json").timeout(Duration.ofSeconds(5))
-                            .build();
+        Node selectButton = dialog.getDialogPane().lookupButton(selectButtonType);
+        selectButton.disableProperty().bind(Bindings.isEmpty(listView.getSelectionModel().getSelectedItems()));
 
-                    try {
-
-                        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-                        // print status code
-                        logger.trace("FXMLmainController::startStatusThread Response Code: " + Integer.toString(response.statusCode()));
-                        logger.trace("FXMLmainController::startStatusThread Response Body: " + response.body());
-                        if (response.statusCode() <= 299) {
-                            // convert the response body into the command array
-                            JSONArray results = new JSONObject(response.body()).getJSONArray("readers");
-                            // If successful, create readers and populate reader list
-                            for (int j = 0; j < results.length(); j++) {
-                                JSONObject p = results.getJSONObject(j);
-
-                                if (p.has("mac") && REGEX_PATTERN.matcher(p.getString("mac")).matches()) {
-                                    if (remoteReaderMap.containsKey(p.getString("mac"))) {
-                                        //readerMap.get(p.getString("mac")).setStatus(p);;
-                                    } else {
-                                        RemoteReader r = new RemoteReader(p.getString("mac"));
-                                        r.setStatus(p);
-                                        Platform.runLater(() -> {
-                                            readerList.add(r);
-                                        });
-                                        remoteReaderMap.put(p.getString("mac"), r);
-                                        logger.debug("New Reader: " + p.getString("mac"));
-                                    }
-                                }
-                            }
-                        }
-                        Thread.sleep(10000);
-                    } catch (IOException | InterruptedException ex) {
-                        logger.error(ex.getMessage());
-                    }
-
-                }
-                logger.debug("Reader Statys Thread Exiting");
-                return null;
+        listView.setOnMouseClicked(click -> {
+            if (click.getClickCount() == 2 && !listView.getSelectionModel().getSelectedItems().isEmpty()) {
+                dialog.setResult(new ArrayList<>(listView.getSelectionModel().getSelectedItems()));
             }
+        });
+
+        BooleanProperty dialogClosed = new SimpleBooleanProperty(false);
+        AtomicInteger loads = new AtomicInteger();
+        Runnable load = () -> {
+            int load_ = loads.incrementAndGet();
+            relay.probe().whenComplete((list, ex) -> Platform.runLater(() -> {
+                if (dialogClosed.get() || load_ != loads.get()) return;
+                if (ex != null) {
+                    String msg = PikaRelay.errorMessage(ex);
+                    setStatus(statusLabel, msg, "warning-label");
+                    placeholder.setText("Unable to get the reader list:\n" + msg);
+                    return;
+                }
+                updateRelayEntries(relay, list, entries);
+                listView.refresh();
+                placeholder.setText("No other readers on this relay.\nA reader shows up here once it sends its status.");
+                setStatus(statusLabel, entries.size() + (entries.size() == 1 ? " reader available" : " readers available"), null);
+            }));
         };
+        refreshButton.setOnAction(event -> load.run());
 
-        Thread resync = new Thread(statusSyncTask);
-        resync.setName("Status Sync Thread");
-        resync.setDaemon(true);
-        resync.start();
+        Timeline refresh = new Timeline(new KeyFrame(javafx.util.Duration.seconds(5), event -> load.run()));
+        refresh.setCycleCount(Animation.INDEFINITE);
+        refresh.play();
+        load.run();
 
+        dialog.setResultConverter(button -> button == selectButtonType
+                ? new ArrayList<>(listView.getSelectionModel().getSelectedItems())
+                : null);
+
+        Optional<List<RelayReaderEntry>> result = dialog.showAndWait();
+        dialogClosed.set(true);
+        refresh.stop();
+
+        result.ifPresent(chosen -> chosen.forEach(entry -> {
+            if (findRemoteReader(relay, entry.id) != null) return; // added meanwhile
+            RemoteReader r = new RemoteReader(relay, entry.id, entry.name);
+            readerList.add(r);
+            logger.debug("New Remote Reader: {} on {}", entry.id, relay);
+        }));
     }
 
-    private void startPollingThread() {
-
-        logger.trace("FXMLmainController::startPollingThread start...");
-        Task dataSyncTask = new Task<Void>() {
-            @Override
-            protected Void call() {
-
-                String endpoint = relayURLTextField.getText();
-                String since = LocalDate.now().toString() + " 00:00:00";
-
-                while (connected.getValue()) {
-                    logger.trace("FXMLmainController::startPollingThread since: " + since);
-
-                    // Try and connectRemote to the endpoint and get the data since the last read
-                    try {
-                        logger.trace("FXMLmainController::startPollingThread request: " + endpoint + "data/since/" + since);
-
-                        HttpRequest request = HttpRequest.newBuilder()
-                                .uri(URI.create(endpoint + "data/since/" + URLEncoder.encode(since, "UTF-8")))
-                                .setHeader("User-Agent", "Echo Transmitter") // add request header
-                                .header("Content-Type", "application/json")
-                                .build();
-
-                        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-                        // print status code
-                        logger.trace("FXMLmainController::startPollingThread Response Code: " + Integer.toString(response.statusCode()));
-                        logger.trace("FXMLmainController::startPollingThread Response Body: " + response.body());
-                        // convert the response body into the command array
-                        if (response.statusCode() <= 299) {
-                            JSONArray results = new JSONObject(response.body()).getJSONArray("time_data");
-
-                            // If successful, create readers and populate reader list
-                            for (int j = 0; j < results.length(); j++) {
-                                JSONObject p = results.getJSONObject(j);
-
-                                if (remoteReaderMap.containsKey(p.getString("mac"))) {
-                                    //readerMap.get(p.getString("mac")).processTime(p);;
-                                }
-                                since = p.getString("posttime");
-                            }
-                        }
-                        Thread.sleep(5000);
-                    } catch (Exception ex) {
-                        logger.error(ex.getMessage());
-                    }
-
-                }
-                logger.debug("Time Poll Thread Exiting");
-                return null;
+    // Update the dialog's entries in place (so the selection is kept) from
+    // {"serverTime":..,"readers":[{"id","name","updated","reading","battery","lastRead"}]},
+    // leaving out the readers that are already added
+    private static void updateRelayEntries(PikaRelay relay, JSONObject list, ObservableList<RelayReaderEntry> entries) {
+        long serverTime = list.optLong("serverTime", System.currentTimeMillis());
+        JSONArray readers = list.optJSONArray("readers");
+        Map<String, RelayReaderEntry> byID = new HashMap<>();
+        entries.forEach(e -> byID.put(e.id, e));
+        Set<String> seen = new HashSet<>();
+        List<RelayReaderEntry> added = new ArrayList<>();
+        for (int i = 0; readers != null && i < readers.length(); i++) {
+            JSONObject r = readers.optJSONObject(i);
+            if (r == null) continue;
+            String id = r.optString("id", "");
+            if (id.isBlank() || findRemoteReader(relay, id) != null) continue;
+            seen.add(id);
+            RelayReaderEntry entry = byID.get(id);
+            if (entry == null) {
+                entry = new RelayReaderEntry(id);
+                added.add(entry);
             }
-        };
+            entry.name = r.optString("name", id);
+            entry.ageSeconds = r.isNull("updated") ? -1 : Math.max(0, (serverTime - r.optLong("updated", serverTime)) / 1000);
+            entry.reading = r.isNull("reading") ? null : r.optBoolean("reading");
+            entry.battery = r.isNull("battery") ? -1 : r.optDouble("battery", -1);
+        }
+        entries.removeIf(e -> !seen.contains(e.id));
+        entries.addAll(added);
+    }
 
-        Thread dataPollThread = new Thread(dataSyncTask);
-        dataPollThread.setName("New Time Poll Thread");
-        dataPollThread.setDaemon(true);
-        dataPollThread.start();
-        logger.trace("FXMLmainController::startPollingThread Thread Started " + dataPollThread.isAlive());
+    /**
+     * @return the remote reader with this id on this relay that has already
+     * been added, or null
+     */
+    private static RemoteReader findRemoteReader(PikaRelay relay, String id) {
+        for (Reader x : readerList) {
+            if (x instanceof RemoteReader r && r.matches(relay, id)) return r;
+        }
+        return null;
+    }
 
+    // A reader in the Add Remote Reader list. Updated in place on refresh.
+    private static class RelayReaderEntry {
+        final String id;
+        String name;
+        long ageSeconds = -1;   // -1: the relay has no status from it
+        Boolean reading = null; // null: unknown
+        double battery = -1;    // -1: unknown
+
+        RelayReaderEntry(String id) {
+            this.id = id;
+            this.name = id;
+        }
+
+        @Override
+        public String toString() {
+            List<String> parts = new ArrayList<>();
+            parts.add(name.equals(id) ? id : name + " (" + id + ")");
+            if (ageSeconds < 0) {
+                parts.add("never seen");
+            } else {
+                parts.add(ageSeconds <= RemoteReaderCellController.WARNING_SECONDS ? "online"
+                        : "last seen " + RemoteReaderCellController.ago((int) Math.min(ageSeconds, Integer.MAX_VALUE - 1)) + " ago");
+            }
+            if (reading != null) parts.add(reading ? "reading" : "idle");
+            if (battery > 0) parts.add("battery " + Math.round(battery) + "%");
+            return String.join(" · ", parts);
+        }
     }
 
     private void changeOutputDir() {

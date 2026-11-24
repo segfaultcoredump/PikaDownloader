@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <?import javafx.geometry.Insets?>
-<?import javafx.scene.control.Accordion?>
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.ChoiceBox?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.ListView?>
+<?import javafx.scene.control.PasswordField?>
 <?import javafx.scene.control.Slider?>
 <?import javafx.scene.control.Spinner?>
 <?import javafx.scene.control.TextField?>
@@ -34,6 +34,7 @@
       <HBox alignment="CENTER_RIGHT" maxWidth="1.7976931348623157E308" spacing="4.0" VBox.vgrow="NEVER">
          <children>
             <Button fx:id="addLocalButton" mnemonicParsing="false" text="Add Local Reader..." />
+            <Button fx:id="addRemoteButton" managed="false" mnemonicParsing="false" text="Add Remote Reader..." visible="false" />
             <Pane maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
             <Button fx:id="reviewReadsButton" mnemonicParsing="false" text="Review Reads..." />
          </children>
@@ -139,39 +140,39 @@
             <Font size="16.0" />
          </font>
       </TitledPane>
-      <Accordion focusTraversable="false" managed="false" visible="false" VBox.vgrow="NEVER">
-        <panes>
-          <TitledPane animated="false" expanded="false" text="Remote Settings">
-               <content>
-                  <VBox>
+      <TitledPane fx:id="remoteRelayTitledPane" animated="false" expanded="false" text="Remote Relay" VBox.vgrow="NEVER">
+         <content>
+            <VBox spacing="4.0">
+               <children>
+                  <HBox alignment="CENTER_LEFT" spacing="5.0">
                      <children>
-                        <HBox alignment="CENTER" maxHeight="1.7976931348623157E308" spacing="2.0">
-                           <children>
-                              <Label minWidth="-Infinity" prefWidth="60.0" text="Relay: " HBox.hgrow="NEVER" />
-                              <TextField fx:id="relayURLTextField" maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
-                              <Button fx:id="connectButton" mnemonicParsing="false" prefHeight="25.0" prefWidth="75.0" text="Connect" />
-                           </children>
-                        </HBox>
-                        <HBox alignment="CENTER" maxHeight="1.7976931348623157E308" maxWidth="1.7976931348623157E308" spacing="4.0" VBox.vgrow="NEVER">
-                           <children>
-                              <Label minHeight="-Infinity" minWidth="-Infinity" prefWidth="60.0" text="Status: " />
-                              <Label fx:id="statusLabel" maxWidth="1.7976931348623157E308" text="&lt;status&gt;" HBox.hgrow="ALWAYS" />
-                           </children>
-                           <VBox.margin>
-                              <Insets bottom="5.0" left="5.0" right="5.0" top="5.0" />
-                           </VBox.margin>
-                        </HBox>
+                        <Label minWidth="-Infinity" prefWidth="90.0" text="Relay URL" />
+                        <TextField fx:id="relayURLTextField" maxWidth="1.7976931348623157E308" promptText="https://relay.example.com" HBox.hgrow="ALWAYS" />
                      </children>
-                  </VBox>
-               </content>
-               <font>
-                  <Font size="16.0" />
-               </font>
-            </TitledPane>
-        </panes>
-         <VBox.margin>
-            <Insets />
-         </VBox.margin>
-      </Accordion>
+                  </HBox>
+                  <HBox alignment="CENTER_LEFT" spacing="5.0">
+                     <children>
+                        <Label minWidth="-Infinity" prefWidth="90.0" text="API Key" />
+                        <TextField fx:id="relayKeyTextField" maxWidth="1.7976931348623157E308" promptText="Optional (secure mode)" HBox.hgrow="ALWAYS" />
+                     </children>
+                  </HBox>
+                  <HBox alignment="CENTER_LEFT" spacing="5.0">
+                     <children>
+                        <Label minWidth="-Infinity" prefWidth="90.0" text="API Secret" />
+                        <PasswordField fx:id="relaySecretField" maxWidth="1.7976931348623157E308" promptText="Optional (secure mode)" HBox.hgrow="ALWAYS" />
+                     </children>
+                  </HBox>
+                  <Label fx:id="relayStatusLabel" maxWidth="1.7976931348623157E308" minHeight="-Infinity" prefWidth="0.0" wrapText="true">
+                     <VBox.margin>
+                        <Insets top="2.0" />
+                     </VBox.margin>
+                  </Label>
+               </children>
+            </VBox>
+         </content>
+         <font>
+            <Font size="16.0" />
+         </font>
+      </TitledPane>
    </children>
 </VBox>

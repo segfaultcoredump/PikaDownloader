@@ -21,6 +21,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
+import org.json.JSONObject;
 
 /**
  *
@@ -35,6 +36,27 @@ public record Read(Reader reader, String chip, Long epochMilli, String tz, Strin
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS", Locale.ROOT);
 
     private static final long MILLIS_PER_DAY = 86_400_000L;
+
+    /**
+     * A PikaReader READ object, from its websocket, a rewind, or PikaRelay
+     * (which stores and returns the same JSON):
+     * {"antenna":3,"chip":"23210006","rssi":-71,"reader":1,"tz":"-07:00","epochMilli":1703796324476,"timestamp":"2023-12-28 13:45:24.476"}
+     *
+     * @param reader the reader it came from
+     * @param tagRead the JSON
+     * @return the read, or null if it has no chip or epochMilli
+     */
+    public static Read fromJSON(Reader reader, JSONObject tagRead) {
+        String chip = tagRead.optString("chip", "");
+        Number epochMilli = tagRead.optNumber("epochMilli");
+        if (chip.isBlank() || epochMilli == null) return null;
+        return new Read(reader, chip, epochMilli.longValue(),
+                tagRead.optString("tz", ""),
+                tagRead.optString("timestamp", ""),
+                tagRead.optInt("antenna"),
+                tagRead.optInt("reader"),
+                tagRead.optDouble("rssi"));
+    }
 
     /**
      * @return the time of day of the read ("HH:mm:ss.SSS"). The dateTime is
