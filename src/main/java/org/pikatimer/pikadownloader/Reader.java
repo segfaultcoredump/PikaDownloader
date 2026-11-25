@@ -31,4 +31,11 @@ public interface Reader {
     public StringProperty getReaderNameProperty();
     public StringProperty getOutputFileProperty();
     public BooleanProperty getOutputToFileProperty();
+
+    /**
+     * True when the reader is enabled, reachable and reporting that it is
+     * reading. Used to confirm quitting while reads are still coming in.
+     * Call on the FX thread.
+     */
+    public boolean isActivelyReading();
 }

@@ -451,6 +451,13 @@ public class LocalReader implements Reader {
     public BooleanProperty getReadingProperty() {
         return readingProperty;
     }
+
+    // readingProperty is not cleared when the websocket drops, so it only
+    // counts while the reader is connected
+    @Override
+    public boolean isActivelyReading() {
+        return enabledProperty.get() && connectedProperty.get() && readingProperty.get();
+    }
     
     @Override
     public StringProperty getReaderNameProperty(){

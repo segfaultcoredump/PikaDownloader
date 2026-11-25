@@ -25,11 +25,18 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.List;
+import java.util.Optional;
 import java.util.Properties;
+import java.util.stream.Collectors;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Scene;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
+import javafx.stage.WindowEvent;
 import javafx.stage.Stage;
 import javafx.geometry.Rectangle2D;
 import javafx.scene.Parent;
@@ -143,6 +150,11 @@ public class Downloader extends Application {
         // like the Read Review are still open. Calls stop() below.
         primaryStage.setOnHidden(event -> Platform.exit());
 
+        // Ask before quitting while a reader is still reading, since its
+        // reads would no longer reach the output files. On macOS, Cmd+Q also
+        // sends a close request, so it is covered here too.
+        primaryStage.setOnCloseRequest(event -> confirmQuit(primaryStage, event));
+
         Platform.runLater(() -> {
         
             Rectangle2D primaryScreenBounds = Screen.getPrimary().getVisualBounds();  
@@ -162,6 +174,42 @@ public class Downloader extends Application {
         primaryStage.show();
         
         
+    }
+
+    // Consumes the close request (keeping the window open) unless there are
+    // no readers reading or the user chooses to quit anyway.
+    private static void confirmQuit(Stage stage, WindowEvent event) {
+        List<Reader> reading = prefs.getReaderList() == null ? List.of()
+                : prefs.getReaderList().stream().filter(Reader::isActivelyReading).toList();
+        if (reading.isEmpty()) return;
+
+        String names = reading.stream()
+                .map(r -> r.getReaderNameProperty().getValueSafe())
+                .collect(Collectors.joining("\n"));
+
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.initOwner(stage);
+        alert.setTitle("Quit Pika Downloader");
+        alert.setHeaderText(reading.size() == 1
+                ? "1 reader is still reading"
+                : reading.size() + " readers are still reading");
+        alert.setContentText(names + "\n\nReads from these readers will not be saved to the "
+                + "output files while Pika Downloader is closed. The readers will keep reading.");
+
+        // Make Cancel the default so an accidental Enter doesn't quit
+        Button quitButton = (Button) alert.getDialogPane().lookupButton(ButtonType.OK);
+        quitButton.setText("Quit Anyway");
+        quitButton.setDefaultButton(false);
+        Button cancelButton = (Button) alert.getDialogPane().lookupButton(ButtonType.CANCEL);
+        cancelButton.setDefaultButton(true);
+
+        Optional<ButtonType> result = alert.showAndWait();
+        if (result.isEmpty() || result.get() != ButtonType.OK) {
+            logger.debug("Quit cancelled, {} reader(s) still reading", reading.size());
+            event.consume();
+        } else {
+            logger.info("Quitting while {} reader(s) are still reading", reading.size());
+        }
     }
 
     @Override

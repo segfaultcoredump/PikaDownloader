@@ -458,6 +458,13 @@ public class RemoteReader implements Reader {
         return seen != UNKNOWN && seen <= seconds;
     }
 
+    // "Connected" means the same as the cell's offline (error) threshold
+    @Override
+    public boolean isActivelyReading() {
+        return enabledProperty.get() && readingProperty.get()
+                && seenWithin(RemoteReaderCellController.OFFLINE_SECONDS);
+    }
+
     // Starts the reader. Completes once the relay has queued the command.
     public CompletableFuture<JSONObject> startReader() {
         return relay.postCommand(readerId, new JSONObject().put("command", "start"));
