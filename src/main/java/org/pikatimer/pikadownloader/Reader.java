@@ -38,4 +38,10 @@ public interface Reader {
      * Call on the FX thread.
      */
     public boolean isActivelyReading();
+
+    /**
+     * The time skew to add to each read when it is written out, in ms (0
+     * while it is off). Safe to call from any thread.
+     */
+    public long getTimeSkewMillis();
 }

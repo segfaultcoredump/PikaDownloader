@@ -119,6 +119,8 @@ public class RemoteReaderCellController {
     @FXML Slider alertToneSlider;
     @FXML Label alertToneLabel;
     @FXML CheckBox alertMuteCheckBox;
+    @FXML TextField timeSkewTextField;
+    @FXML ToggleSwitch timeSkewToggleSwitch;
 
     // The ChoiceBox's own copy of the profile list (see LocalReaderCellController)
     private final ObservableList<ReaderProfile> profileChoices = FXCollections.observableArrayList();
@@ -282,6 +284,11 @@ public class RemoteReaderCellController {
         // Never start a drag-to-reorder from the slider (see LocalReaderCellController)
         alertToneSlider.setOnDragDetected(Event::consume);
 
+        // Time skew for this reader's reads (see TimeSkew). The switch always
+        // starts off. The field consumes its own drags like the slider.
+        reader.getTimeSkew().bindControls(timeSkewToggleSwitch, timeSkewTextField);
+        timeSkewTextField.setOnDragDetected(Event::consume);
+
         // Error: not heard from in OFFLINE_SECONDS (or never), low battery,
         // an RFID reader problem, or a bad key. Warning: not heard from in
         // WARNING_SECONDS, or the relay can't be reached right now.
@@ -326,7 +333,9 @@ public class RemoteReaderCellController {
                 reader.getLastSeenProperty(),
                 reader.getRelayProblemProperty(),
                 reader.getBatteryProperty(),
-                reader.getRFIDReaderProblemProperty());
+                reader.getRFIDReaderProblemProperty(),
+                reader.getTimeSkew().enabledProperty(),
+                reader.getTimeSkew().durationProperty());
         Label titleStatusLabel = new Label();
         titleStatusLabel.getStyleClass().add("reader-status-label");
         titleStatusLabel.setMinWidth(0); // truncate rather than widen the window
@@ -372,6 +381,12 @@ public class RemoteReaderCellController {
         double battery = reader.getBatteryProperty().get();
         if (battery >= 0) {
             parts.add((battery <= LOW_BATTERY ? "Low Battery: " : "Battery: ") + Math.round(battery * 100) + "%");
+        }
+
+        // An active skew, so it is visible while collapsed
+        java.time.Duration skew = reader.getTimeSkew().durationProperty().get();
+        if (reader.getTimeSkew().enabledProperty().get() && skew != null && !skew.isZero()) {
+            parts.add("Skew: " + TimeSkew.format(skew, true));
         }
         return String.join(" · ", parts);
     }

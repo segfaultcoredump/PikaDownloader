@@ -16,6 +16,7 @@
  */
 package org.pikatimer.pikadownloader;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -155,6 +156,8 @@ public class LocalReaderCellController {
     @FXML Slider alertToneSlider;
     @FXML Label alertToneLabel;
     @FXML CheckBox alertMuteCheckBox;
+    @FXML TextField timeSkewTextField;
+    @FXML ToggleSwitch timeSkewToggleSwitch;
 
     BooleanProperty errorState = new SimpleBooleanProperty(false);
     
@@ -256,7 +259,9 @@ public class LocalReaderCellController {
                 reader.isEnabled(),
                 reader.getLastUpdatedProperty(),
                 reader.getBatteryProperty(),
-                reader.getRFIDReaderProblemProperty());
+                reader.getRFIDReaderProblemProperty(),
+                reader.getTimeSkew().enabledProperty(),
+                reader.getTimeSkew().durationProperty());
         Label titleStatusLabel = new Label();
         titleStatusLabel.getStyleClass().add("reader-status-label");
         titleStatusLabel.setMinWidth(0); // truncate rather than widen the window
@@ -455,6 +460,11 @@ public class LocalReaderCellController {
         // bubble up to it, so this is a backstop in case that changes.
         alertToneSlider.setOnDragDetected(Event::consume);
 
+        // Time skew for this reader's reads (see TimeSkew). The switch always
+        // starts off. The field consumes its own drags like the slider.
+        reader.getTimeSkew().bindControls(timeSkewToggleSwitch, timeSkewTextField);
+        timeSkewTextField.setOnDragDetected(Event::consume);
+
         // enter an error state if the battery is at or below 20%,
         // we have not heard from the unit in 10 seconds, or one of its
         // RFID readers is not connected,
@@ -494,6 +504,12 @@ public class LocalReaderCellController {
         double battery = reader.getBatteryProperty().get();
         if (battery >= 0) {
             parts.add((battery <= LOW_BATTERY ? "Low Battery: " : "Battery: ") + Math.round(battery * 100) + "%");
+        }
+
+        // An active skew, so it is visible while collapsed
+        Duration skew = reader.getTimeSkew().durationProperty().get();
+        if (reader.getTimeSkew().enabledProperty().get() && skew != null && !skew.isZero()) {
+            parts.add("Skew: " + TimeSkew.format(skew, true));
         }
         return String.join(" · ", parts);
     }

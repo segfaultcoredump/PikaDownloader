@@ -11,6 +11,7 @@ Permits downloading timing data from a [PikaReader](https://github.com/PikaTimer
 * Provides a Chip -> Bib mapping function to allow for reporting a Bib number in place of the raw chip number. Leading zeroes on chip numbers are ignored when matching. If the output includes a Bib but no Chip -> Bib map is in use, the chip number is written in its place and the Output Settings pane shows a warning.
 * Optionally only outputs reads for chips that are in the Chip -> Bib map. Trigger reads (chip `0`) are always output.
 * Optionally overrides the timezone offset of the reads written to the output files. Turn on "Override Timezone Offset" and pick a fixed UTC offset from -12:00 to +14:00 in 15-minute steps (the default is the computer's current offset). The date, time and timezone of each read are recomputed from its EpochMilli, which does not change. Milliseconds are kept. The Review Reads window also shows times at the override offset. The override is not saved and is off each time PikaDownloader starts.
+* Optionally skews the time of one reader's reads, for a reader whose clock is off. In the reader's Advanced pane, enter a duration as `[-]HH:MM:ss[.SSS]` (for example `-00:00:02.500` makes its reads 2.5 seconds earlier) and turn the Time Skew switch on. The skew applies to the date, time and EpochMilli written to the output files, and to the Review Reads window. It does not change rewind times, which stay in the reader's own time. The duration is saved, but the switch is off each time PikaDownloader starts. While a skew is on, the collapsed reader title shows it.
 
 
 # Remote Readers (PikaRelay)
@@ -57,7 +58,7 @@ Note that escape codes are case insensitive. You can preface the codes with eith
 For Date and Time fields, you can optionaly specify a date/time formatter by enclosing the code in brackets and by separating the output code by a format string separated by a colon (:).
   * Example: `%{D:MM/dd/yyy}` would print `01/02/2026`
 
-While the timezone override is on, the Date, Time, DateTime and TimeZone codes (including formatted ones like `%{D:MM/DD/YYYY}`) use the override offset. EpochMilli is never changed.
+While the timezone override is on, the Date, Time, DateTime and TimeZone codes (including formatted ones like `%{D:MM/DD/YYYY}`) use the override offset. EpochMilli is not changed by the override. A reader's time skew moves every time code, EpochMilli included.
 
 See the Java API docs for DateTimeFormatter at <https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/time/format/DateTimeFormatter.html#patterns)> for valid data and time formatting codes. 
 

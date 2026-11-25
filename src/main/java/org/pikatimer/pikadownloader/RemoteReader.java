@@ -146,6 +146,9 @@ public class RemoteReader implements Reader {
     private volatile int alertTone = ReadAlert.DEFAULT_HZ;
     private volatile boolean alertMuted = false;
 
+    // Time skew (added to each read at output)
+    private final TimeSkew timeSkew;
+
     // The polling thread. A thread stops once this no longer points to it.
     private volatile Thread pollThread = null;
     // The live poll cursor: the relay's receive time (epoch ms)
@@ -185,6 +188,7 @@ public class RemoteReader implements Reader {
             alertMuted = newValue;
             prefs.putBoolean(alertMutePrefKey, newValue);
         });
+        timeSkew = new TimeSkew(prefs, "REMOTE-READER-SKEW-" + readerId);
 
         outputFileProperty.setValue(prefs.get(outputPrefKey, ""));
         if (!outputFileProperty.isEmpty().get()) outputToFileProperty.set(true);
@@ -682,6 +686,15 @@ public class RemoteReader implements Reader {
 
     public BooleanProperty getAlertMutedProperty() {
         return alertMutedProperty;
+    }
+
+    public TimeSkew getTimeSkew() {
+        return timeSkew;
+    }
+
+    @Override
+    public long getTimeSkewMillis() {
+        return timeSkew.getMillis();
     }
 
     /** True if this is the reader with this id on this relay */

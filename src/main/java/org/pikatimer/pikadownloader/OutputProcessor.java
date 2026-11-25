@@ -402,8 +402,9 @@ public enum OutputProcessor {
     }
 
     // offset: the timezone override, or null for the reader's own date/time.
-    // Only applied here (not when the read comes in) so de-duplication and
-    // the reader's last read are unaffected.
+    // It and each reader's time skew are only applied here (not when the
+    // read comes in) so de-duplication and the reader's last read are
+    // unaffected.
     private void writeReads(Path path, List<Read> reads, ZoneOffset offset) {
         try {
             logger.trace("Writing {} reads to {}", reads.size(), path);
@@ -424,7 +425,7 @@ public enum OutputProcessor {
             for (Read read : reads) {
                 String line;
                 try {
-                    line = readToString(read.atOffset(offset));
+                    line = readToString(read.adjusted(offset, read.reader().getTimeSkewMillis()));
                 } catch (RuntimeException ex) {
                     // Skip the bad read, but keep going with the rest
                     logger.error("Unable to format read {} from {}: {}", read.chip(), read.reader().getReaderNameProperty().getValueSafe(), ex.toString());

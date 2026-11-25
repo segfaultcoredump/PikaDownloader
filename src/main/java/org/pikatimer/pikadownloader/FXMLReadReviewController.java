@@ -98,10 +98,14 @@ public class FXMLReadReviewController {
     // State the rows were last built with. If any of it changes, the rows
     // need to be rebuilt rather than just merged.
     private Map<Reader, String> readerNames = null;
+    // Reader -> its time skew in ms (only readers with a skew on), so the
+    // times match the output files. Never changed once built (the parallel
+    // sort reads it).
+    private Map<Reader, Long> readerSkews = Map.of();
     private int bibMapVersion = -1;
     // The timezone override (null when off): times are shown at this offset
     private ZoneOffset tzOverride = null;
-    private Filter filter = new Filter(null, Set.of(), Map.of(), false, null);
+    private Filter filter = new Filter(null, Set.of(), Map.of(), false, null, Map.of());
     private Comparator<Entry> comparator = NEWEST_FIRST;
 
     // The last valid search (null for none)
@@ -122,8 +126,12 @@ public class FXMLReadReviewController {
         readerColumn.setCellValueFactory(c -> c.getValue().read().reader().getReaderNameProperty());
         chipColumn.setCellValueFactory(c -> new ReadOnlyStringWrapper(c.getValue().read().chip()));
         bibColumn.setCellValueFactory(c -> new ReadOnlyStringWrapper(OutputProcessor.INSTANCE.mappedBibFor(c.getValue().read().chip())));
-        // At the timezone override's offset (if on), to match the output files
-        timeColumn.setCellValueFactory(c -> new ReadOnlyStringWrapper(c.getValue().read().timeOfDay(tzOverride)));
+        // With the reader's time skew and at the timezone override's offset
+        // (if on), to match the output files
+        timeColumn.setCellValueFactory(c -> {
+            Read read = c.getValue().read();
+            return new ReadOnlyStringWrapper(read.timeOfDay(tzOverride, readerSkews.getOrDefault(read.reader(), 0L)));
+        });
 
         // Not used by the sort policy below (see columnComparator()), but
         // keeps the table's own comparator in line with it
@@ -190,10 +198,11 @@ public class FXMLReadReviewController {
             if (bibColumn.isVisible() != bibInUse) bibColumn.setVisible(bibInUse);
 
             if (!names.equals(readerNames) || OutputProcessor.INSTANCE.bibMapVersion() != bibMapVersion
-                    || !Objects.equals(OutputProcessor.INSTANCE.getTimezoneOverride(), tzOverride)) {
-                // A reader was added or renamed, or the bibs or the timezone
-                // override changed, so the current order (and filter) may be
-                // out of date
+                    || !Objects.equals(OutputProcessor.INSTANCE.getTimezoneOverride(), tzOverride)
+                    || !currentReaderSkews().equals(readerSkews)) {
+                // A reader was added or renamed, or the bibs, the timezone
+                // override or a time skew changed, so the current order (and
+                // filter) may be out of date
                 rebuild(false);
             } else if (fresh.length > 0) {
                 addRows(fresh);
@@ -214,11 +223,12 @@ public class FXMLReadReviewController {
         seen = all.length;
 
         readerNames = currentReaderNames();
+        readerSkews = currentReaderSkews();
         bibMapVersion = OutputProcessor.INSTANCE.bibMapVersion();
         tzOverride = OutputProcessor.INSTANCE.getTimezoneOverride();
         timeColumn.setText(tzOverride == null ? "Time" : "Time (" + FXMLmainController.displayOffset(tzOverride) + ")");
         filter = new Filter(searchPattern, Set.copyOf(readerCheckComboBox.getCheckModel().getCheckedItems()),
-                readerNames, bibColumn.isVisible(), tzOverride);
+                readerNames, bibColumn.isVisible(), tzOverride, readerSkews);
         comparator = currentComparator(readerNames);
 
         Entry[] shown = filter.matchesAll() ? all : Arrays.stream(all).parallel().filter(filter).toArray(Entry[]::new);
@@ -311,8 +321,14 @@ public class FXMLReadReviewController {
         if (column == chipColumn) return (a, b) -> dir * ALPHANUMERIC.compare(a.read().chip(), b.read().chip());
         if (column == bibColumn) return (a, b) -> dir * ALPHANUMERIC.compare(
                 OutputProcessor.INSTANCE.mappedBibFor(a.read().chip()), OutputProcessor.INSTANCE.mappedBibFor(b.read().chip()));
-        // By the actual time, so reads after midnight sort after the ones before it
-        if (column == timeColumn) return (a, b) -> dir * Long.compare(a.read().epochMilli(), b.read().epochMilli());
+        // By the actual time (with the skew), so reads after midnight sort
+        // after the ones before it
+        if (column == timeColumn) {
+            Map<Reader, Long> skews = readerSkews;
+            return (a, b) -> dir * Long.compare(
+                    a.read().epochMilli() + skews.getOrDefault(a.read().reader(), 0L),
+                    b.read().epochMilli() + skews.getOrDefault(b.read().reader(), 0L));
+        }
         return null;
     }
 
@@ -321,6 +337,16 @@ public class FXMLReadReviewController {
         Map<Reader, String> names = new HashMap<>();
         knownReaders.forEach(r -> names.put(r, r.getReaderNameProperty().getValueSafe()));
         return names;
+    }
+
+    // Reader -> its time skew in ms, for every reader in the log with a skew on
+    private Map<Reader, Long> currentReaderSkews() {
+        Map<Reader, Long> skews = new HashMap<>();
+        knownReaders.forEach(r -> {
+            long skew = r.getTimeSkewMillis();
+            if (skew != 0) skews.put(r, skew);
+        });
+        return skews;
     }
 
     // The filter lists every reader with reads, plus the current readers
@@ -378,8 +404,9 @@ public class FXMLReadReviewController {
 
     // Immutable, so it can be used from a parallel stream
     // offset: the timezone override (null when off), for the time search
+    // skews: reader -> time skew in ms, for the time search
     private record Filter(Pattern pattern, Set<String> readers, Map<Reader, String> names, boolean bibVisible,
-            ZoneOffset offset) implements Predicate<Entry> {
+            ZoneOffset offset, Map<Reader, Long> skews) implements Predicate<Entry> {
 
         boolean matchesAll() {
             return pattern == null && readers.isEmpty();
@@ -394,7 +421,7 @@ public class FXMLReadReviewController {
             return pattern.matcher(read.chip()).find()
                     || pattern.matcher(name).find()
                     || (bibVisible && pattern.matcher(OutputProcessor.INSTANCE.mappedBibFor(read.chip())).find())
-                    || pattern.matcher(read.timeOfDay(offset)).find();
+                    || pattern.matcher(read.timeOfDay(offset, skews.getOrDefault(read.reader(), 0L))).find();
         }
     }
 }

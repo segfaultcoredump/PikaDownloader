@@ -150,6 +150,10 @@ public class LocalReader implements Reader {
     private volatile int alertTone = ReadAlert.DEFAULT_HZ;
     private volatile boolean alertMuted = false;
 
+    // Time skew (added to each read at output), its duration saved under the
+    // same unit ID
+    private final TimeSkew timeSkew;
+
     // True while a connection attempt is in progress
     private final AtomicBoolean connecting = new AtomicBoolean(false);
 
@@ -204,6 +208,7 @@ public class LocalReader implements Reader {
             alertMuted = newValue;
             prefs.putBoolean(alertMutePrefKey, newValue);
         });
+        timeSkew = new TimeSkew(prefs, "LOCAL-READER-SKEW-" + reader_id);
 
         //Connect to the reader
         connect();
@@ -528,6 +533,15 @@ public class LocalReader implements Reader {
     // True to silence the read alert for just this reader
     public BooleanProperty getAlertMutedProperty(){
         return alertMutedProperty;
+    }
+
+    public TimeSkew getTimeSkew(){
+        return timeSkew;
+    }
+
+    @Override
+    public long getTimeSkewMillis(){
+        return timeSkew.getMillis();
     }
 
     public void clearReadRecords(){

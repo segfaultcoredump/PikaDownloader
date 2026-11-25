@@ -17,10 +17,14 @@ package org.pikatimer.pikadownloader;
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+import java.time.DateTimeException;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import org.json.JSONObject;
 
 /**
@@ -36,6 +40,9 @@ public record Read(Reader reader, String chip, Long epochMilli, String tz, Strin
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS", Locale.ROOT);
 
     private static final long MILLIS_PER_DAY = 86_400_000L;
+
+    // tz -> its offset, or null if it isn't one (see ownOffset())
+    private static final Map<String, ZoneOffset> OFFSET_CACHE = new ConcurrentHashMap<>();
 
     /**
      * A PikaReader READ object, from its websocket, a rewind, or PikaRelay
@@ -84,6 +91,43 @@ public record Read(Reader reader, String chip, Long epochMilli, String tz, Strin
     }
 
     /**
+     * The read as it is written out: moved by the reader's time skew, then to
+     * the timezone override (if any). The epochMilli is moved by the skew too.
+     * Only used at output, so de-duplication (Read equality) is unaffected.
+     *
+     * @param override the timezone override, or null to keep the reader's own
+     * offset (and tz)
+     * @param skewMillis the time skew in ms (0 for none)
+     * @return the adjusted copy, or this read if there is nothing to change
+     */
+    public Read adjusted(ZoneOffset override, long skewMillis) {
+        if (skewMillis == 0 || epochMilli == null) return atOffset(override);
+        long shiftedMilli = epochMilli + skewMillis;
+        ZoneOffset offset = override != null ? override : ownOffset(shiftedMilli);
+        String shifted = Instant.ofEpochMilli(shiftedMilli).atOffset(offset).format(DATE_TIME);
+        return new Read(reader, chip, shiftedMilli, override != null ? override.getId() : tz, shifted, antenna, rfidReader, rssi);
+    }
+
+    // The offset of the reader's tz (e.g. "-07:00" or "Z"), or the local
+    // zone's offset at that time if the tz is missing or not an offset (the
+    // same fallback as CustomFormat)
+    private ZoneOffset ownOffset(long atMilli) {
+        ZoneOffset offset = null;
+        if (tz != null && !tz.isBlank()) {
+            offset = OFFSET_CACHE.computeIfAbsent(tz, z -> {
+                try {
+                    ZoneId zone = ZoneId.of(z);
+                    return zone instanceof ZoneOffset o ? o : null;
+                } catch (DateTimeException e) {
+                    return null;
+                }
+            });
+        }
+        if (offset != null) return offset;
+        return ZoneId.systemDefault().getRules().getOffset(Instant.ofEpochMilli(atMilli));
+    }
+
+    /**
      * Same as atOffset(offset).timeOfDay(), without a formatter, since the
      * Read Review search runs this over every read.
      *
@@ -91,8 +135,21 @@ public record Read(Reader reader, String chip, Long epochMilli, String tz, Strin
      * @return the time of day ("HH:mm:ss.SSS") at the offset
      */
     public String timeOfDay(ZoneOffset offset) {
-        if (offset == null || epochMilli == null) return timeOfDay();
-        long ms = Math.floorMod(epochMilli + offset.getTotalSeconds() * 1000L, MILLIS_PER_DAY);
+        return timeOfDay(offset, 0L);
+    }
+
+    /**
+     * Same as adjusted(offset, skewMillis).timeOfDay(), without a formatter.
+     *
+     * @param offset the timezone override, or null for the reader's own offset
+     * @param skewMillis the time skew in ms (0 for none)
+     * @return the time of day ("HH:mm:ss.SSS") as it is written out
+     */
+    public String timeOfDay(ZoneOffset offset, long skewMillis) {
+        if (epochMilli == null || (offset == null && skewMillis == 0)) return timeOfDay();
+        long shiftedMilli = epochMilli + skewMillis;
+        if (offset == null) offset = ownOffset(shiftedMilli);
+        long ms = Math.floorMod(shiftedMilli + offset.getTotalSeconds() * 1000L, MILLIS_PER_DAY);
         int millis = (int) (ms % 1000);
         int seconds = (int) (ms / 1000 % 60);
         int minutes = (int) (ms / 60_000 % 60);
