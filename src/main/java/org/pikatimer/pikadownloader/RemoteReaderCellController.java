@@ -116,6 +116,8 @@ public class RemoteReaderCellController {
     @FXML Label relayLabel;
     @FXML Button disconnectButton;
     @FXML Button removeButton;
+    @FXML Button rewriteOutputButton;
+    private final BooleanProperty rewriteRunning = new SimpleBooleanProperty(false);
     @FXML Slider alertToneSlider;
     @FXML Label alertToneLabel;
     @FXML CheckBox alertMuteCheckBox;
@@ -620,6 +622,10 @@ public class RemoteReaderCellController {
         outputFileToggleSwitch.disableProperty().bind(validFileName.not());
         validFileName.addListener((ov, o, valid) -> updateOutputFileState(valid));
         updateOutputFileState(validFileName.get());
+
+        // Rewrite Output... (Advanced pane), only while the output is on
+        rewriteOutputButton.disableProperty().bind(reader.getOutputToFileProperty().not().or(rewriteRunning));
+        rewriteOutputButton.setOnAction(e -> OutputRewrite.confirmAndRun(reader, rewriteOutputButton, rewriteRunning));
     }
 
     private void updateOutputFileState(boolean valid) {

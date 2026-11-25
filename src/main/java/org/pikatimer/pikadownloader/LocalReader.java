@@ -33,6 +33,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -542,6 +544,11 @@ public class LocalReader implements Reader {
     @Override
     public long getTimeSkewMillis(){
         return timeSkew.getMillis();
+    }
+
+    @Override
+    public Collection<Read> getProcessedReads() {
+        return Collections.unmodifiableSet(processedReads);
     }
 
     public void clearReadRecords(){

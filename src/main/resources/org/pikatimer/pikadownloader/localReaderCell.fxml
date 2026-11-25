@@ -160,10 +160,11 @@
                                  </children>
                               </HBox>
                               <Separator />
-                              <HBox>
+                              <HBox spacing="5.0">
                                  <children>
-                                    <Button fx:id="disconnectButton" mnemonicParsing="false" text="Disconnect" />
+                                    <Button fx:id="rewriteOutputButton" mnemonicParsing="false" text="Rewrite Output..." />
                                     <Pane maxWidth="1.7976931348623157E308" HBox.hgrow="ALWAYS" />
+                                    <Button fx:id="disconnectButton" mnemonicParsing="false" text="Disconnect" />
                                     <Button fx:id="removeButton" mnemonicParsing="false" text="Remove" />
                                  </children>
                               </HBox>

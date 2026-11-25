@@ -16,6 +16,7 @@
  */
 package org.pikatimer.pikadownloader;
 
+import java.util.Collection;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.StringProperty;
 import javafx.scene.layout.Pane;
@@ -44,4 +45,11 @@ public interface Reader {
      * while it is off). Safe to call from any thread.
      */
     public long getTimeSkewMillis();
+
+    /**
+     * Every unique read from this reader this session (an unmodifiable,
+     * unordered view). Safe to iterate from any thread. Used to rewrite the
+     * output file (OutputProcessor.rewriteOutputFile).
+     */
+    public Collection<Read> getProcessedReads();
 }

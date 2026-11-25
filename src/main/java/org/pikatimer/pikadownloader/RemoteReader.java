@@ -23,6 +23,8 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -695,6 +697,11 @@ public class RemoteReader implements Reader {
     @Override
     public long getTimeSkewMillis() {
         return timeSkew.getMillis();
+    }
+
+    @Override
+    public Collection<Read> getProcessedReads() {
+        return Collections.unmodifiableSet(processedReads);
     }
 
     /** True if this is the reader with this id on this relay */

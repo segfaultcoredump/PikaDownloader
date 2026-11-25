@@ -19,12 +19,16 @@ package org.pikatimer.pikadownloader;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -353,15 +357,11 @@ public enum OutputProcessor {
             Reader r = read.reader();
             // Make sure we are supposed to do something here
             if (!r.getOutputToFileProperty().get()) continue;
-            String outputFile = r.getOutputFileProperty().getValueSafe();
-            if (outputFile.isBlank()) continue;
+            if (r.getOutputFileProperty().getValueSafe().isBlank()) continue;
 
-            if (onlyMapped) {
-                String chip = Chips.normalize(read.chip());
-                if (!TRIGGER_CHIP.equals(chip) && !bibChipMap.containsKey(chip)) {
-                    unmappedCount++;
-                    continue;
-                }
+            if (!passesChipFilter(read, onlyMapped)) {
+                unmappedCount++;
+                continue;
             }
 
             if (!dirOK) {
@@ -370,18 +370,8 @@ public enum OutputProcessor {
                 continue;
             }
 
-            Path path;
-            try {
-                path = dirPath.resolve(outputFile).normalize();
-            } catch (InvalidPathException ex) {
-                logger.error("Invalid output file name \"{}\" for reader {}", outputFile, r.getReaderNameProperty().getValueSafe());
-                continue;
-            }
-            // Don't let a file name like ../foo.txt escape the output directory
-            if (!dirPath.equals(path.getParent())) {
-                logger.error("Output file \"{}\" for reader {} is not in the output directory", outputFile, r.getReaderNameProperty().getValueSafe());
-                continue;
-            }
+            Path path = resolveOutputPath(dirPath, r, true);
+            if (path == null) continue;
             readsByFile.computeIfAbsent(path, p -> new ArrayList<>()).add(read);
         }
 
@@ -442,6 +432,177 @@ public enum OutputProcessor {
         } catch (RuntimeException ex) {
             logger.error("Unexpected error writing {} reads to {}", reads.size(), path, ex);
         }
+    }
+
+    // False if the mapped-chips filter is on (onlyMapped) and the read's chip
+    // is not in the chip -> bib map. Trigger reads always pass.
+    private boolean passesChipFilter(Read read, boolean onlyMapped) {
+        if (!onlyMapped) return true;
+        String chip = Chips.normalize(read.chip());
+        return TRIGGER_CHIP.equals(chip) || bibChipMap.containsKey(chip);
+    }
+
+    // The reader's output file in dirPath (absolute and normalized), or null
+    // if the file name is blank, invalid, or would be outside of dirPath
+    // (e.g. ../foo.txt). Does not check the output-to-file toggle.
+    private static Path resolveOutputPath(Path dirPath, Reader r, boolean log) {
+        String outputFile = r.getOutputFileProperty().getValueSafe();
+        if (outputFile.isBlank()) return null;
+        Path path;
+        try {
+            path = dirPath.resolve(outputFile).normalize();
+        } catch (InvalidPathException ex) {
+            if (log) logger.error("Invalid output file name \"{}\" for reader {}", outputFile, r.getReaderNameProperty().getValueSafe());
+            return null;
+        }
+        // Don't let a file name like ../foo.txt escape the output directory
+        if (!dirPath.equals(path.getParent())) {
+            if (log) logger.error("Output file \"{}\" for reader {} is not in the output directory", outputFile, r.getReaderNameProperty().getValueSafe());
+            return null;
+        }
+        return path;
+    }
+
+    /**
+     * @param reader the reader
+     * @param allReaders every reader
+     * @return the readers (including this one) whose output is on and goes
+     * to the same file as this reader's, or an empty list if this reader's
+     * output is off or its file can't be resolved. Call on the FX thread.
+     */
+    public List<Reader> readersSharingFile(Reader reader, Collection<Reader> allReaders) {
+        File outputDir = PikaDownloaderPrefs.INSTANCE.getOutputDir();
+        if (outputDir == null || !reader.getOutputToFileProperty().get()) return List.of();
+        Path dirPath = outputDir.toPath().toAbsolutePath().normalize();
+        Path path = resolveOutputPath(dirPath, reader, false);
+        if (path == null) return List.of();
+        return sharingReaders(dirPath, path, reader, allReaders);
+    }
+
+    private static List<Reader> sharingReaders(Path dirPath, Path path, Reader reader, Collection<Reader> allReaders) {
+        List<Reader> sharing = new ArrayList<>();
+        sharing.add(reader);
+        for (Reader other : allReaders) {
+            if (other == reader || !other.getOutputToFileProperty().get()) continue;
+            if (path.equals(resolveOutputPath(dirPath, other, false))) sharing.add(other);
+        }
+        return sharing;
+    }
+
+    /**
+     * Replace the reader's output file with every read held in memory for
+     * it, and for any other reader whose output goes to the same file. The
+     * reads are written in time order with the current output format, time
+     * skews, timezone override, chip -> bib map and mapped-chips filter.
+     *
+     * Anything already queued is written out first. The new file is written
+     * to a temp file and then moved over the old one, so a timing program
+     * importing it never sees half a file. Later reads are appended as usual.
+     *
+     * Blocks while it writes, so call it from a background thread.
+     *
+     * @param reader the reader
+     * @param allReaders a snapshot of every reader (taken on the FX thread)
+     * @return the number of reads written
+     * @throws IOException with a message for the user if the file can't be
+     * written
+     */
+    public int rewriteOutputFile(Reader reader, Collection<Reader> allReaders) throws IOException {
+        String name = reader.getReaderNameProperty().getValueSafe();
+        if (!reader.getOutputToFileProperty().get()) {
+            throw new IOException("Output to a file is turned off for " + name + ".");
+        }
+        File outputDir = PikaDownloaderPrefs.INSTANCE.getOutputDir();
+        String dirProblem = PikaDownloaderPrefs.outputDirProblem(outputDir);
+        if (dirProblem != null) throw new IOException(dirProblem + ".");
+        Path dirPath = outputDir.toPath().toAbsolutePath().normalize();
+        Path path = resolveOutputPath(dirPath, reader, true);
+        if (path == null) {
+            throw new IOException("\"" + reader.getOutputFileProperty().getValueSafe()
+                    + "\" is not a valid file name in the output directory.");
+        }
+
+        outputLock.lock();
+        try {
+            if (shutdown) throw new IOException("Pika Downloader is shutting down.");
+            if (closeRequested.getAndSet(false)) closeWriters();
+
+            // Write out what is already queued, so it is not appended again
+            // after the rewrite. A read that is queued after this but added
+            // to processedReads before the snapshot below can still end up
+            // in the file twice, which is harmless (rewinds do the same).
+            readQueue.drainTo(pending);
+            writePending();
+
+            ZoneOffset offset = timezoneOverride;
+            boolean onlyMapped = mappedChipsOnly && bibMapEnabled && !bibChipMap.isEmpty();
+            List<Reader> sharing = sharingReaders(dirPath, path, reader, allReaders);
+
+            List<Read> reads = new ArrayList<>();
+            for (Reader r : sharing) {
+                long skew = r.getTimeSkewMillis();
+                for (Read read : r.getProcessedReads()) {
+                    if (!passesChipFilter(read, onlyMapped)) continue;
+                    try {
+                        reads.add(read.adjusted(offset, skew));
+                    } catch (RuntimeException ex) {
+                        logger.error("Unable to adjust read {} from {}: {}", read.chip(), r.getReaderNameProperty().getValueSafe(), ex.toString());
+                    }
+                }
+            }
+            // Time order (as written, so after the skew), then a stable tie break
+            reads.sort(Comparator
+                    .comparingLong((Read r) -> r.epochMilli() == null ? Long.MIN_VALUE : r.epochMilli())
+                    .thenComparing(r -> r.reader().getReaderNameProperty().getValueSafe())
+                    .thenComparing(r -> r.chip() == null ? "" : r.chip())
+                    .thenComparingInt(r -> r.antenna() == null ? 0 : r.antenna()));
+
+            closeWriter(path);
+            int written;
+            Path temp = Files.createTempFile(dirPath, ".pika-rewrite-", ".tmp");
+            try {
+                written = writeWholeFile(temp, reads, StandardOpenOption.TRUNCATE_EXISTING);
+                try {
+                    Files.move(temp, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                } catch (FileSystemException ex) {
+                    // e.g. no atomic moves on a network share, or Windows when
+                    // another program has the file open: write it in place
+                    // instead
+                    logger.debug("Unable to replace {} with a move ({}), rewriting it in place", path, ex.toString());
+                    written = writeWholeFile(path, reads, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+                }
+            } finally {
+                Files.deleteIfExists(temp);
+            }
+            logger.info("Rewrote {} with {} reads from {}", path, written,
+                    sharing.stream().map(r -> r.getReaderNameProperty().getValueSafe()).toList());
+            return written;
+        } finally {
+            outputLock.unlock();
+        }
+    }
+
+    // Write the header and the (already adjusted) reads to the file.
+    // Returns the number of reads written. Must hold outputLock.
+    private int writeWholeFile(Path file, List<Read> reads, StandardOpenOption... options) throws IOException {
+        int written = 0;
+        try (BufferedWriter bw = Files.newBufferedWriter(file, options)) {
+            bw.write(getHeader());
+            bw.newLine();
+            for (Read read : reads) {
+                String line;
+                try {
+                    line = readToString(read);
+                } catch (RuntimeException ex) {
+                    logger.error("Unable to format read {} from {}: {}", read.chip(), read.reader().getReaderNameProperty().getValueSafe(), ex.toString());
+                    continue;
+                }
+                bw.write(line);
+                bw.newLine();
+                written++;
+            }
+        }
+        return written;
     }
 
     private void warnMissingOutputDir(Set<String> readers, int count) {

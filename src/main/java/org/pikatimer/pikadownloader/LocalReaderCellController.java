@@ -151,6 +151,8 @@ public class LocalReaderCellController {
     
     @FXML Button disconnectButton;
     @FXML Button removeButton;
+    @FXML Button rewriteOutputButton;
+    private final BooleanProperty rewriteRunning = new SimpleBooleanProperty(false);
 
     // Read alert (in the Advanced pane)
     @FXML Slider alertToneSlider;
@@ -423,6 +425,10 @@ public class LocalReaderCellController {
         outputFileToggleSwitch.disableProperty().bind(validFileName.not());
         validFileName.addListener((ov, o, valid) -> updateOutputFileState(valid));
         updateOutputFileState(validFileName.get());
+
+        // Rewrite Output... (Advanced pane), only while the output is on
+        rewriteOutputButton.disableProperty().bind(reader.getOutputToFileProperty().not().or(rewriteRunning));
+        rewriteOutputButton.setOnAction(e -> OutputRewrite.confirmAndRun(reader, rewriteOutputButton, rewriteRunning));
 
         startReaderButton.setOnAction(event -> {
             toggleReading();
